@@ -20,11 +20,44 @@ ROUNDS = 5
 
 # Physical Error Rate (p): The probability of an error occurring at each operation.
 # e.g., 0.01 means a 1% chance of depolarization error per step.
-NOISE_RATE = 0.01
+NOISE_RATE = 0.20
 
 # Number of Shots: How many independent experiments (samples) to simulate.
 # We use a small number here for verification purposes.
 NUM_SHOTS = 3
+
+def inspect_shot_details(shot_idx, raw_detectors, mapper):
+    """
+    Specific utility to see which detectors fired and where they are on the grid.
+    """
+    # 1. 해당 샷(Shot)의 데이터 가져오기
+    shot_data = raw_detectors[shot_idx]
+
+    # 2. 값이 1인(에러가 발생한) 탐지기의 인덱스 찾기 (1D)
+    # np.flatnonzero: 0이 아닌 값의 인덱스를 싹 긁어옵니다.
+    fired_indices = np.flatnonzero(shot_data)
+
+    print(f"\n=== 🔍 상세 분석 (Shot #{shot_idx}) ===")
+    print(f"총 {len(fired_indices)}개의 탐지기가 켜졌습니다.")
+    print("-" * 50)
+    print(f"{'Detector ID (1D)':<20} | {'Grid Coord (Y, X)':<20}")
+    print("-" * 50)
+
+    # 3. 각 인덱스에 해당하는 2D 좌표 찾기
+    for idx in fired_indices:
+        # mapper.indices 배열에서 해당 탐지기 ID가 몇 번째에 있는지 찾음
+        lookup_loc = np.where(mapper.indices == idx)[0]
+
+        if len(lookup_loc) > 0:
+            i = lookup_loc[0] # 매퍼 내부에서의 순번
+            r = mapper.mapped_rows[i] # Y 좌표 (Row)
+            c = mapper.mapped_cols[i] # X 좌표 (Column)
+            print(f"Detector {idx:<11} | (y={r}, x={c})")
+        else:
+            print(f"Detector {idx:<11} | 매핑 정보 없음 (누락됨?)")
+    print("-" * 50)
+    
+    
 
 def main():
     """
@@ -114,6 +147,9 @@ def main():
         print("    - WARNING: No edges found. This is unexpected for noisy circuits.")
         
     print("    -> Step 3 Complete.\n")
+    
+    # 0번째 샷에 대해 1D -> 2D 상세 정보 출력
+    inspect_shot_details(0, raw_detectors, image_mapper)
 
     print("=== All Checks Passed Successfully! ===")
 

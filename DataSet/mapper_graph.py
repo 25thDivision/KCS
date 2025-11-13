@@ -44,7 +44,7 @@ class SyndromeGraphMapper:
         Returns:
             np.ndarray: Edge list of shape [2, num_edges] (Source, Target).
         """
-        dem = circuit.detector_error_model(decompose_errors=True)
+        dem = circuit.detector_error_model(decompose_errors=True, ignore_decomposition_failures=True)
         edges: Set[Tuple[int, int]] = set()
 
         # Iterate over all instructions in the flattened DEM
