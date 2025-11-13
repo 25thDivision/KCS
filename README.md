@@ -1,4 +1,4 @@
-Even thouhg there is a "requirements.txt",
+Even though there is a "requirements.txt",
 You need to install **pytorch** on your own!
 
 # How to install PyTorch
