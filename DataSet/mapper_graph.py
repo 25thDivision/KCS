@@ -1,6 +1,6 @@
 import stim
 import numpy as np
-from typing import Tuple, List, Set
+from typing import Tuple, Set
 
 class SyndromeGraphMapper:
     """
