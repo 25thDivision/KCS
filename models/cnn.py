@@ -1,60 +1,53 @@
-# models/cnn.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SimpleCNN(nn.Module):
-    def __init__(self, height, width, in_channels=1, num_observables=1):
+class CNN(nn.Module):
+    def __init__(self, height, width, in_channels=1, num_classes=1):
         """
-        'd'값에 상관없이 범용적으로 작동하는 CNN 모델
-        
         Args:
-            height (int): 입력 이미지의 높이 (e.g., d=5일 때 6)
-            width (int): 입력 이미지의 너비 (e.g., d=5일 때 5)
+            height (int): 입력 이미지의 높이 (d=5일 때 6)
+            width (int): 입력 이미지의 너비 (d=5일 때 5)
+            in_channels (int): 입력 채널 수 (보통 1)
+            num_classes (int): 예측할 큐비트의 총 개수 (물리적 에러 위치 추적용)
         """
-        super(SimpleCNN, self).__init__()
+        super(CNN, self).__init__()
         
-        self.in_channels = in_channels
-        self.num_observables = num_observables
-        
-        # 1. Convolutional Layer
+        # [Layer 1] Convolutional Layer
+        # 커널 크기 3x3, 스트라이드 1을 사용하여 지역적 특징을 추출합니다.
         self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, stride=1, padding=0)
+        
+        # Pooling Layer (학습 파라미터는 없으므로 층 개수에는 보통 포함하지 않습니다)
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
         
-        # 2. FC Layer를 만들기 위해, Conv/Pool을 거친 후의
-        #    최종 H'과 W' 크기를 동적으로 계산합니다.
-        
-        # (N, C, H, W) -> (N, 16, H-2, W-2)
+        # FC Layer 진입을 위한 차원 계산
+        # (H, W) -> Conv -> (H-2, W-2) -> Pool -> ((H-2)/2, (W-2)/2)
         conv_height = height - 2
         conv_width = width - 2
-        
-        # (N, 16, H-2, W-2) -> (N, 16, H'/2, W'/2)
         pool_height = (conv_height - 2) // 2 + 1
         pool_width = (conv_width - 2) // 2 + 1
         
-        # 최종 flattened_size 계산
         self.flattened_size = 16 * pool_height * pool_width
         
+        # [Layer 2] Hidden Fully Connected Layer
         self.fc1 = nn.Linear(self.flattened_size, 64)
-        self.fc_out = nn.Linear(64, num_observables)
+        
+        # [Layer 3] Output Fully Connected Layer
+        # 최종적으로 각 큐비트의 에러 확률을 출력합니다.
+        self.fc_out = nn.Linear(64, num_classes)
 
     def forward(self, x):
-        """
-        x: (Batch, 1, H, W)
-        """
-        # Conv 1
+        # 1. Feature Extraction (Conv -> ReLU -> Pool)
         x = self.conv1(x)
         x = F.relu(x)
         x = self.pool1(x)
         
-        # Flatten
-        x = torch.flatten(x, 1) # (Batch, 16 * H' * W')
+        # 2. Flatten (1D 벡터로 펼치기)
+        x = torch.flatten(x, 1) 
         
-        # FC Layers
+        # 3. Classification (FC -> ReLU -> FC)
         x = self.fc1(x)
         x = F.relu(x)
-        
-        # Output Layer
         x = self.fc_out(x)
         
         return x

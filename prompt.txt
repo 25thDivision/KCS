@@ -1,0 +1,78 @@
+내가 이전에 너랑 연구인데, 방이 고정 핀 버그로 추정되는 현상으로 인해 폭파되어서 다시 알려줄게. 우선 나는 지금 2d Color Code의 오류증후군을 CNN, transformer 등의 모델들로 분석하고 오류를 정정하는 과정을 벤치마킹하는 연구를 하고 있어. 벤치마킹은 크게 3분야에서 측정돼: Accuracy, Inference time, Error Correction Rate. 내 연구의 주된 reference는 지금 올려준 논문이고 이것과 비슷하게 해 나갈 생각이야. 내가 올려준 내 github repository를 보면 알겠지만, 지금 난 stim을 이용해 2d color code error syndrome을 생성하는 코드와 그 1D짜리 오류들을 그래프로 잇는 코드, 그리고 CNN의 기본 구조까지는 작성했어. 일단 코드를 한번 리뷰해보고 니가 어디까지 이해했는지 알기 위해 니가 이해한걸 전부 말해줘.
+
+고쳐야 할 점 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+현재 코드와 논문의 내용, 그리고 일반적인 QEC 머신러닝 벤치마크의 구조를 비교했을 때, 연구 재현 및 성능 향상을 위해 보완이 시급한 3가지 핵심 영역이 보입니다.
+
+특히, 현재 코드는 **"데이터를 읽어오고 모델에 넣는 연결 고리"**가 빠져 있고, **"모델이 풀어야 할 문제(Label)의 정의"**가 논문과 다릅니다.
+
+1. 학습 데이터셋 클래스 구현 (당장 실행 불가한 부분)
+train.py에서는 DataLoader를 사용하고 있지만, 정작 numpy 데이터를 DataLoader가 이해할 수 있는 형태로 감싸주는 Dataset Class가 구현되어 있지 않습니다. main.py에서 만든 numpy 배열을 바로 학습에 쓸 수 없습니다.
+
+보완 제안: torch.utils.data.Dataset을 상속받는 클래스를 만들어야 합니다.
+
+Python
+
+# 예시 코드 (dataset.py)
+import torch
+from torch.utils.data import Dataset
+
+class QECDataset(Dataset):
+    def __init__(self, features, labels):
+        """
+        features: (N, 1, H, W) for CNN or (N, Nodes, Features) for GNN
+        labels: (N, Num_Targets)
+        """
+        self.features = torch.FloatTensor(features)
+        self.labels = torch.FloatTensor(labels)
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return self.features[idx], self.labels[idx]
+이후 main.py에서 train_one_epoch을 호출하기 전에 이 클래스로 데이터를 감싸줘야 합니다.
+
+2. 타겟 레이블(Label)의 정의가 논문과 다름 (가장 중요한 개념적 차이)
+사용자님의 코드는 **raw_observables (논리적 오류 발생 여부)**를 예측하도록 설정되어 있습니다. 하지만 Reference 논문은 "물리적 데이터 큐비트의 에러 위치"를 예측합니다.
+
+현재 코드 (raw_observables):
+
+입력: 신드롬
+
+출력: "이 샷에서 논리적 Z 오류가 발생했는가?" (0 또는 1)
+
+의미: 에러 정정 실패 확률을 예측하는 분류기 (High-level decoding).
+
+논문 (Figure 3 참조):
+
+입력: 신드롬
+
+출력: 모든 데이터 큐비트 각각에 대해 "에러 없음, X에러, Z에러, 둘 다"를 예측.
+
+의미: 에러가 발생한 큐비트를 콕 집어내는 정정기 (Low-level decoding).
+
+보완 제안: 논문을 충실히 따르려면 syndrome_gen.py를 수정해야 합니다. 현재 stim의 sampler.sample()은 물리적 에러 위치를 반환하지 않습니다. 논문과 같은 방식(Physical Error Prediction)을 하려면:
+
+stim 시뮬레이션 시, 에러가 발생한 큐비트의 정보를 추적할 수 있도록 코드를 변경해야 합니다 (예: stim.TableauSimulator 사용 또는 에러 주입 과정을 직접 제어).
+
+모델의 출력층(fc_out) 크기를 num_observables가 아니라 num_data_qubits * 3 (X, Y, Z 에러 확률) 등으로 키워야 합니다.
+
+만약 논리적 오류 예측(현재 방식)을 유지하겠다면, 논문의 ECR(Error Correction Rate) 지표와 사용자님의 ECR 지표가 의미가 다르다는 점을 인지해야 합니다.
+
+3. GNN을 위한 노드 특성(Node Features) 강화
+mapper_graph.py를 보면 현재 노드 피처는 단순히 "신드롬이 켜졌나(1) 꺼졌나(0)" 만을 담고 있습니다. 하지만 Color Code나 Surface Code에서는 **탐지기의 종류(Color/Type)**가 매우 중요한 정보입니다.
+
+보완 제안: 신드롬 정보 외에 그래프의 구조적 정보를 피처에 추가하면 GNN 성능이 크게 오릅니다.
+
+탐지기 타입: Color Code는 Red, Green, Blue 3가지 타입의 stabilizer가 있습니다. 이를 One-hot encoding으로 노드 피처에 추가하세요.
+
+좌표 정보: 현재 SimpleCNN은 이미지 좌표를 쓰지만, GNN은 좌표를 모릅니다. mapper_graph.py에서 (x, y) 좌표를 정규화하여 노드 피처에 포함시키면([syndrome_val, norm_x, norm_y]), GNN이 거리를 인식하는 데 도움이 됩니다.
+
+요약: 우선 순위
+[필수] dataset.py를 만들어 numpy 데이터를 DataLoader에 연결.
+
+[결정 필요] 내가 예측하고 싶은 것이 **"논리적 에러 여부"**인가(현재 코드 유지), 아니면 논문처럼 **"물리적 에러 위치"**인가(데이터 생성 코드 수정 필요)?
+
+[개선] GNN 구현 시 노드 피처에 좌표나 Stabilizer 타입 정보 추가.
+
+이 중 **2번(타겟 레이블 정의)**에 대해 어떻게 진행하고 싶으신가요? 논문 방식을 그대로 따르고 싶으신가요, 아니면 현재의 논리적 에러 예측 방식을 발전시키고 싶으신가요?

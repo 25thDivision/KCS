@@ -1,52 +1,63 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-from tqdm import tqdm # 학습 진행률을 보여주는 라이브러리
+from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+import numpy as np
+
+# ----------------------------------------------------
+# 0. Dataset 클래스 (새로 추가됨)
+# ----------------------------------------------------
+class QECDataset(Dataset):
+    """
+    Numpy 데이터를 PyTorch 학습용 데이터셋으로 변환하는 클래스입니다
+    """
+    def __init__(self, features: np.ndarray, labels: np.ndarray):
+        """
+        Args:
+            features: (N, 1, H, W) for CNN or (N, Nodes, Feats) for GNN
+            labels: (N, Num_Qubits) 물리적 에러 라벨
+        """
+        # 모델 입력과 손실 함수 계산을 위해 FloatTensor로 변환합니다
+        self.features = torch.FloatTensor(features)
+        self.labels = torch.FloatTensor(labels)
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return self.features[idx], self.labels[idx]
 
 # ----------------------------------------------------
 # 1. 손실 함수 (Loss Function) 정의
 # ----------------------------------------------------
-# Sigmoid를 거치지 않은 Logit 값을 입력받아 BCE Loss를 계산 (수치적으로 안정적)
+# Multi-label classification(각 큐비트가 에러인지 아닌지 독립적으로 판단)에 적합합니다
 loss_fn = nn.BCEWithLogitsLoss()
 
 
 # ----------------------------------------------------
 # 2. 1 에포크(Epoch) 학습 함수
 # ----------------------------------------------------
-def train_one_epoch(model, data_loader, optimizer):
+def train_one_epoch(model, data_loader, optimizer, device='cpu'):
     """
-    모델을 1 에포크 동안 학습시킵니다.
-    
-    Args:
-        model (nn.Module): 학습시킬 모델 (e.g., SimpleCNN_d5)
-        data_loader (DataLoader): 학습용 데이터 로더 (배치 단위로 데이터 공급)
-        optimizer (torch.optim.Optimizer): 옵티마이저 (e.g., Adam)
-    
-    Returns:
-        float: 1 에포크 동안의 평균 Loss
+    모델을 1 에포크 동안 학습시킵니다
     """
-    model.train() # 모델을 "학습 모드"로 설정
+    model.train() # 학습 모드
+    model.to(device)
     
     total_loss = 0.0
     
-    # tqdm: 데이터 로더를 순회하며 진행 바(progress bar)를 표시
-    for inputs, labels in tqdm(data_loader, desc="Training Epoch"):
+    for inputs, labels in tqdm(data_loader, desc="Training Epoch", leave=False):
+        inputs, labels = inputs.to(device), labels.to(device)
         
-        # 1. 옵티마이저의 그래디언트 초기화 (필수)
         optimizer.zero_grad()
         
-        # 2. 순전파 (Forward Pass)
-        # inputs는 (Batch, 1, 6, 5) 크기의 이미지 텐서
+        # 순전파
         outputs = model(inputs)
         
-        # 3. 손실(Loss) 계산
-        # labels는 (Batch, 1) 크기, outputs도 (Batch, 1) 크기여야 함
-        loss = loss_fn(outputs, labels.float()) # Y가 float 타입이어야 함
+        # 손실 계산 (Output shape: [Batch, Num_Qubits], Label shape: [Batch, Num_Qubits])
+        loss = loss_fn(outputs, labels)
         
-        # 4. 역전파 (Backward Pass) - PyTorch가 알아서 그래디언트 계산
         loss.backward()
-        
-        # 5. 가중치 업데이트 (Weight Update) - Adam 로직이 여기서 자동으로 실행됨
         optimizer.step()
         
         total_loss += loss.item()
@@ -55,64 +66,57 @@ def train_one_epoch(model, data_loader, optimizer):
 
 
 # ----------------------------------------------------
-# 3. 평가(Evaluation) 함수 (Accuracy, ECR 측정용)
+# 3. 평가(Evaluation) 함수 (수정됨)
 # ----------------------------------------------------
-def evaluate(model, data_loader):
+def evaluate(model, data_loader, device='cpu'):
     """
-    모델을 평가 데이터셋으로 평가합니다.
+    모델을 평가하고 Accuracy와 Error Correction Rate(ECR)를 계산합니다
     
-    Args:
-        model (nn.Module): 평가할 모델
-        data_loader (DataLoader): 평가용 데이터 로더
-    
-    Returns:
-        tuple: (평균 Loss, 전체 Accuracy, Error Correction Rate)
+    - Accuracy: 전체 큐비트 중 상태(에러 유무)를 맞춘 비율
+    - ECR: 실제로 에러가 난 큐비트 중 에러라고 맞춘 비율 (Recall)
     """
-    model.eval() # 모델을 "평가 모드"로 설정 (Dropout 등 비활성화)
+    model.eval()
+    model.to(device)
     
     total_loss = 0.0
     
-    correct_predictions = 0
-    total_samples = 0
+    # Accuracy 계산 변수
+    total_correct_qubits = 0
+    total_qubits_count = 0
     
-    # ECR (Error Correction Rate) 계산을 위한 변수
-    # (참고: ECR의 정확한 정의에 따라 로직이 복잡해질 수 있습니다.
-    #       여기서는 "실제 논리 오류가 있었던(Label=1) 샘플" 중에서
-    #       "정확히 맞춘(Prediction=1) 비율"로 가정합니다.)
-    error_samples = 0
-    correctly_corrected_errors = 0
+    # ECR 계산 변수
+    total_error_qubits = 0      # 실제 에러가 난 큐비트 총 개수 (TP + FN)
+    corrected_error_qubits = 0  # 그 중 맞춘 개수 (TP)
 
-    # torch.no_grad(): 그래디언트 계산을 멈춰 메모리/속도 최적화
     with torch.no_grad():
-        for inputs, labels in tqdm(data_loader, desc="Evaluating"):
+        for inputs, labels in tqdm(data_loader, desc="Evaluating", leave=False):
+            inputs, labels = inputs.to(device), labels.to(device)
             
-            # 1. 순전파 (Forward Pass)
-            outputs = model(inputs) # Logit 값 (e.g., -2.5, 1.8, ...)
-            
-            # 2. 손실 계산
-            loss = loss_fn(outputs, labels.float())
+            outputs = model(inputs)
+            loss = loss_fn(outputs, labels)
             total_loss += loss.item()
             
-            # 3. Accuracy 계산
-            # Logit을 0/1 예측으로 변환 (Sigmoid > 0.5 == Logit > 0)
+            # Logit -> 0/1 예측 변환 (Threshold 0.0 == Sigmoid 0.5)
             preds = (outputs > 0).float()
             
-            correct_predictions += (preds == labels).sum().item()
-            total_samples += labels.size(0)
+            # 1. Overall Accuracy 계산
+            # (preds == labels)는 [Batch, Num_Qubits] 크기의 True/False 행렬입니다
+            total_correct_qubits += (preds == labels).sum().item()
+            total_qubits_count += labels.numel() # 배치 크기 * 큐비트 수
             
-            # 4. ECR 계산
-            # 실제 오류가 있었던(Label=1) 샘플들의 인덱스
-            error_indices = (labels == 1).nonzero(as_tuple=True)[0]
+            # 2. Error Correction Rate (ECR) 계산
+            # 실제 에러가 있는 위치(Label=1)를 찾습니다
+            error_mask = (labels == 1)
             
-            if error_indices.numel() > 0:
-                error_samples += error_indices.numel()
-                # 그 중에서 예측도 1로 맞춘 경우
-                correctly_corrected_errors += (preds[error_indices] == 1).sum().item()
+            total_error_qubits += error_mask.sum().item()
+            
+            # 실제 에러가 있는 곳에서 예측도 1인 경우를 셉니다
+            corrected_error_qubits += (preds[error_mask] == 1).sum().item()
 
     avg_loss = total_loss / len(data_loader)
-    accuracy = correct_predictions / total_samples
     
-    # ECR 계산 (0으로 나누는 오류 방지)
-    ecr = (correctly_corrected_errors / error_samples) if error_samples > 0 else 0.0
+    # 분모가 0인 경우 방지
+    accuracy = total_correct_qubits / total_qubits_count if total_qubits_count > 0 else 0.0
+    ecr = corrected_error_qubits / total_error_qubits if total_error_qubits > 0 else 0.0
 
     return avg_loss, accuracy, ecr

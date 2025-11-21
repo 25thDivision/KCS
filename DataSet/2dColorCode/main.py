@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import torch  # Imported to ensure compatibility checks later
+import torch
 
-# Import custom modules for data generation and mapping
+# 커스텀 모듈 임포트
 from syndrome_gen import create_color_code_circuit, generate_dataset
 from mapper_image import SyndromeImageMapper
 from mapper_graph import SyndromeGraphMapper
@@ -10,105 +10,81 @@ from mapper_graph import SyndromeGraphMapper
 # ==============================================================================
 # Configuration Parameters
 # ==============================================================================
-# Distance (d): The size of the code. Determines the number of qubits and detectors.
-# A larger distance means better error protection but a larger simulation overhead.
 DISTANCE = 5
-
-# Rounds (T): The number of repeated syndrome measurement cycles.
-# This adds the 'time' dimension to handle measurement errors.
 ROUNDS = 5
-
-# Physical Error Rate (p): The probability of an error occurring at each operation.
-# e.g., 0.01 means a 1% chance of depolarization error per step.
 NOISE_RATE = 0.20
-
-# Number of Shots: How many independent experiments (samples) to simulate.
-# We use a small number here for verification purposes.
 NUM_SHOTS = 3
 
 def inspect_shot_details(shot_idx, raw_detectors, mapper):
     """
-    Specific utility to see which detectors fired and where they are on the grid.
+    특정 샷(Shot)에서 어떤 탐지기가 켜졌는지 위치와 함께 상세히 확인합니다
     """
-    # 1. 해당 샷(Shot)의 데이터 가져오기
     shot_data = raw_detectors[shot_idx]
-
-    # 2. 값이 1인(에러가 발생한) 탐지기의 인덱스 찾기 (1D)
-    # np.flatnonzero: 0이 아닌 값의 인덱스를 싹 긁어옵니다.
     fired_indices = np.flatnonzero(shot_data)
 
     print(f"\n=== 🔍 상세 분석 (Shot #{shot_idx}) ===")
-    print(f"총 {len(fired_indices)}개의 탐지기가 켜졌습니다.")
+    print(f"총 {len(fired_indices)}개의 탐지기가 켜졌습니다")
     print("-" * 50)
     print(f"{'Detector ID (1D)':<20} | {'Grid Coord (Y, X)':<20}")
     print("-" * 50)
 
-    # 3. 각 인덱스에 해당하는 2D 좌표 찾기
     for idx in fired_indices:
-        # mapper.indices 배열에서 해당 탐지기 ID가 몇 번째에 있는지 찾음
         lookup_loc = np.where(mapper.indices == idx)[0]
-
         if len(lookup_loc) > 0:
-            i = lookup_loc[0] # 매퍼 내부에서의 순번
-            r = mapper.mapped_rows[i] # Y 좌표 (Row)
-            c = mapper.mapped_cols[i] # X 좌표 (Column)
+            i = lookup_loc[0]
+            r = mapper.mapped_rows[i]
+            c = mapper.mapped_cols[i]
             print(f"Detector {idx:<11} | (y={r}, x={c})")
         else:
-            print(f"Detector {idx:<11} | 매핑 정보 없음 (누락됨?)")
+            print(f"Detector {idx:<11} | 매핑 정보 없음")
     print("-" * 50)
-    
     
 
 def main():
     """
-    Main execution function to verify the entire pipeline:
-    1. Generate Quantum Data (Stim)
-    2. Preprocess for CNN (Image Mapping)
-    3. Preprocess for GNN (Graph Mapping)
+    전체 파이프라인 검증 함수:
+    1. 데이터 생성 (Stim + Physical Error Labeling)
+    2. CNN용 이미지 매핑 전처리
+    3. GNN용 그래프 매핑 전처리
     """
     print(f"=== Project: Color Code Decoding Benchmark (d={DISTANCE}, p={NOISE_RATE}) ===\n")
 
     # ==========================================================================
-    # Step 1: Generate Raw Quantum Data
+    # Step 1: Raw Quantum Data 생성
     # ==========================================================================
-    # We create the quantum circuit definition using Stim.
     print(">>> [Step 1] Generating Circuit and Raw Data...")
+    
+    # 1-1. 회로 생성 (매퍼 초기화용)
+    # generate_dataset 내부에서도 회로를 만들지만, 
+    # 매퍼(Mapper)들이 사용할 회로 구조 정보가 필요하므로 여기서도 생성합니다
     circuit = create_color_code_circuit(DISTANCE, ROUNDS, NOISE_RATE)
     
-    # Sample syndromes (detectors) and logical flip information (observables).
-    # - raw_detectors: The input data (X) for our models.
-    # - raw_observables: The target labels (Y) we want to predict.
-    raw_detectors, raw_observables = generate_dataset(circuit, NUM_SHOTS)
+    # 1-2. 데이터 생성 (수정된 부분)
+    # 인자가 변경되었습니다: (circuit, shots) -> (distance, rounds, noise, shots)
+    # 반환값이 변경되었습니다: observables -> physical_errors (물리적 에러 위치)
+    raw_detectors, physical_errors = generate_dataset(DISTANCE, ROUNDS, NOISE_RATE, NUM_SHOTS)
     
     print(f"    - Raw Detector Data Shape:   {raw_detectors.shape}")
     print(f"      (Format: [Num_Shots, Num_Detectors])")
-    print(f"    - Raw Observable Data Shape: {raw_observables.shape}")
-    print(f"      (Format: [Num_Shots, Num_Observables])")
+    print(f"    - Physical Error Data Shape: {physical_errors.shape}")
+    print(f"      (Format: [Num_Shots, Num_Qubits] - Label: 0=Clean, 1=Error)")
     print("    -> Step 1 Complete.\n")
 
     # ==========================================================================
-    # Step 2: Map to 2D Images (for CNN / U-Net)
+    # Step 2: 2D 이미지 매핑 (CNN용)
     # ==========================================================================
-    # CNNs require spatial data structure (Grid).
-    # The Mapper converts the 1D detector list into a 2D image based on coordinates.
     print(">>> [Step 2] Mapping to 2D Images (for CNN/U-Net)...")
     image_mapper = SyndromeImageMapper(circuit)
     
-    # Perform the conversion.
-    # Output format is compatible with PyTorch: (Batch, Channel, Height, Width)
     syndrome_images = image_mapper.map_to_images(raw_detectors)
     
     print(f"    - Mapped Image Shape: {syndrome_images.shape}")
     print(f"      (Format: [Batch_Size, Channels, Height, Width])")
     print(f"    - Grid Dimensions:    {image_mapper.height} x {image_mapper.width}")
     
-    # Visualization: Plot the first sample to visually verify the mapping.
-    # If the mapping is correct, you should see a sparse grid of dots.
+    # 시각화
     print("    - Visualizing the first sample...")
     plt.figure(figsize=(6, 6))
-    
-    # Visualize the first shot (index 0) and first channel (index 0).
-    # origin='lower' ensures the (0,0) coordinate is at the bottom-left.
     plt.imshow(syndrome_images[0, 0], origin='lower', cmap='Reds', interpolation='nearest')
     plt.title(f"Syndrome Image Visualization (d={DISTANCE})")
     plt.colorbar(label="Syndrome Triggered (1.0) / Quiet (0.0)")
@@ -118,29 +94,22 @@ def main():
     print("    -> Step 2 Complete.\n")
 
     # ==========================================================================
-    # Step 3: Map to Graph Nodes & Edges (for GNN / Graph Transformer)
+    # Step 3: 그래프 매핑 (GNN용)
     # ==========================================================================
-    # GNNs require a graph structure: Nodes (features) and Edges (connectivity).
-    # The GraphMapper extracts this topology from the circuit's error model (DEM).
     print(">>> [Step 3] Mapping to Graph Nodes & Edges (for GNN)...")
     graph_mapper = SyndromeGraphMapper(circuit)
     
-    # 1. Node Features: The status of each detector (0 or 1).
-    # Reshaped to [Batch, Num_Nodes, Num_Features].
+    # 노드 피처 생성 (이제 Stabilizer Type 정보가 포함되어 채널 수가 4입니다)
     node_features = graph_mapper.map_to_node_features(raw_detectors)
-    
-    # 2. Edges: The connections between detectors.
-    # Extracted from physical error mechanisms (e.g., an error triggering two detectors).
     edges = graph_mapper.get_edges()
     
     print(f"    - Node Features Shape: {node_features.shape}")
     print(f"      (Format: [Batch, Num_Nodes, Feature_Dim])")
+    print(f"      * Feature_Dim = 4 (1 Syndrome + 3 One-hot Colors)")
     print(f"    - Edge Index Shape:    {edges.shape}")
-    print(f"      (Format: [2, Num_Edges] - Source/Target pairs)")
     
     print(f"    - Graph Statistics:    {graph_mapper.num_nodes} Nodes, {edges.shape[1]} Edges found.")
     
-    # Logic Check: If physical noise > 0, edges must exist in the graph.
     if edges.shape[1] > 0:
         print("    - Graph connectivity check: Passed (Edges exist).")
     else:
@@ -148,7 +117,7 @@ def main():
         
     print("    -> Step 3 Complete.\n")
     
-    # 0번째 샷에 대해 1D -> 2D 상세 정보 출력
+    # 상세 정보 출력
     inspect_shot_details(0, raw_detectors, image_mapper)
 
     print("=== All Checks Passed Successfully! ===")

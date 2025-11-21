@@ -1,3 +1,3 @@
-from .cnn import SimpleCNN
+from .cnn import CNN
 
-__all__ = ["SimpleCNN"]
+__all__ = ["CNN"]
