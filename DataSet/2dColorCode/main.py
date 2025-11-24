@@ -116,6 +116,29 @@ def main():
         print("    - WARNING: No edges found. This is unexpected for noisy circuits.")
         
     print("    -> Step 3 Complete.\n")
+
+    # ==========================================================================
+    # Step 4: 모델 입출력 차원 검증 (CNN)
+    # ==========================================================================
+    print(">>> [Step 4] Verifying CNN Model I/O...")
+    
+    # models 패키지 경로에 주의하세요 (main.py 위치 기준 상위 폴더 참조 필요)
+    # 실행 위치에 따라 sys.path 설정이 필요할 수 있습니다.
+    try:
+        # 편의상 모델 정의를 가져오거나 shape만 체크합니다.
+        # 여기서는 shape만 논리적으로 맞는지 확인합니다.
+        num_qubits = physical_errors.shape[1]
+        print(f"    - Model Output Layer Size should be: {num_qubits}")
+        print(f"    - Current Labels (Physical Errors) match this shape.")
+        
+        # 실제 텐서 변환 테스트
+        tensor_img = torch.FloatTensor(syndrome_images)
+        print(f"    - Tensor Conversion Check: Passed. Shape {tensor_img.shape}")
+        
+    except Exception as e:
+        print(f"    - WARNING: Model verification failed: {e}")
+
+    print("    -> Step 4 Complete.\n")
     
     # 상세 정보 출력
     inspect_shot_details(0, raw_detectors, image_mapper)

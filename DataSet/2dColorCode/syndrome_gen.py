@@ -52,37 +52,20 @@ def generate_dataset(
     
     print(f"[Generator] Generating {shots} samples with physical error labels...")
 
-    # 3. 시뮬레이터를 초기화합니다
-    sim = stim.TableauSimulator()
-
     for i in range(shots):
-        # 3-1. 회로를 실행하여 상태를 초기화합니다
-        sim.do(circuit)
-        
-        # 3-2. 랜덤한 물리적 에러 벡터를 생성합니다 (Code Capacity Noise Model)
-        # 각 큐비트에 대해 noise_rate 확률로 에러(여기선 Z 에러 가정)를 발생시킵니다
+        # 3-1. 랜덤한 물리적 에러 벡터 생성
         err_vector = np.random.binomial(1, noise_rate, size=num_qubits).astype(np.uint8)
         physical_errors[i] = err_vector
         
-        # 에러가 발생한 큐비트의 인덱스를 추출합니다
         error_indices = np.flatnonzero(err_vector)
         
-        # 3-3. 시뮬레이터에 에러를 주입합니다
-        # Color Code에서 Z 에러는 X Stabilizer를 트리거하므로 Z_ERROR 연산을 사용합니다
-        if len(error_indices) > 0:
-            # stim 명령어 포맷에 맞춰 문자열을 구성합니다
-            targets = " ".join(map(str, error_indices))
-            sim.do(stim.Circuit(f"Z_ERROR(1) {targets}"))
-            
-        # 3-4. 측정 결과로부터 신드롬(Detector event)을 계산합니다
-        # Code Capacity 모델(Single Round)에서는 측정값 처리가 비교적 단순합니다
-        # 정확한 라벨링을 위해 에러가 주입된 임시 회로를 만들어 컴파일러를 사용합니다
-        
+        # 3-2. 임시 회로 생성 및 에러 주입
         noisy_circuit = circuit.copy()
         if len(error_indices) > 0:
-             noisy_circuit.append("Z_ERROR", error_indices, 1.0) # 100% 확률로 에러 주입
+             # [안전장치] numpy array를 list로 변환하여 전달 (.tolist())
+             noisy_circuit.append("Z_ERROR", error_indices.tolist(), 1.0) 
         
-        # 이 샷에 대한 신드롬을 추출합니다
+        # 3-3. 신드롬 추출 (compile_detector_sampler 사용)
         sampler = noisy_circuit.compile_detector_sampler()
         shot_result = sampler.sample(shots=1, bit_packed=False)[0]
         detector_data[i] = shot_result

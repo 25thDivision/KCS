@@ -37,7 +37,7 @@ loss_fn = nn.BCEWithLogitsLoss()
 # ----------------------------------------------------
 # 2. 1 에포크(Epoch) 학습 함수
 # ----------------------------------------------------
-def train_one_epoch(model, data_loader, optimizer, device='cpu'):
+def train_one_epoch(model, data_loader, optimizer, device='cuda'):
     """
     모델을 1 에포크 동안 학습시킵니다
     """
