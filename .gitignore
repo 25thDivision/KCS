@@ -1,2 +1,5 @@
 # Python 가상 환경 폴더 무시
 .venv/
+
+# 캐시 파일 무시
+__pycache__/

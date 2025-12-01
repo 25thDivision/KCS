@@ -20,7 +20,8 @@ NOISE_RATE_TRAIN = 0.05  # 학습용 노이즈 (조금 어렵게 설정하는 �
 NUM_TRAIN = 100000       # 학습 데이터 개수 (예: 10만 개)
 NUM_TEST = 10000         # 테스트 데이터 개수 (예: 1만 개)
 
-OUTPUT_DIR = "../data/2d_color_code"  # 저장할 폴더명
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(CURRENT_DIR, "../dataset/color_code/graph")     # 저장할 폴더 경로
 
 def save_dataset(mode, num_samples, noise_rate, mapper):
     print(f"\n>>> Generating {mode} set ({num_samples} samples, p={noise_rate})...")
