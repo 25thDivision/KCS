@@ -14,33 +14,32 @@ class CNN(nn.Module):
         super(CNN, self).__init__()
         
         # [Layer 1] Convolutional Layer
-        # 커널 크기 3x3, 스트라이드 1을 사용하여 지역적 특징을 추출합니다.
-        self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, stride=1, padding=0)
+        # 커널 크기 3x3, 스트라이드 1, 패딩 1 (이미지 크기 유지)
+        # 작은 이미지(6x5)에서 정보를 잃지 않으려면 padding=1을 주는 것이 좋습니다.
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1)
         
-        # Pooling Layer (학습 파라미터는 없으므로 층 개수에는 보통 포함하지 않습니다)
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        # [삭제됨] Pooling Layer
+        # 이미지가 너무 작아서(6x5) 풀링을 하면 위치 정보가 사라지므로 제거했습니다.
+        # self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
         
-        # FC Layer 진입을 위한 차원 계산
-        # (H, W) -> Conv -> (H-2, W-2) -> Pool -> ((H-2)/2, (W-2)/2)
-        conv_height = height - 2
-        conv_width = width - 2
-        pool_height = (conv_height - 2) // 2 + 1
-        pool_width = (conv_width - 2) // 2 + 1
+        # FC Layer 진입을 위한 차원 계산 (Pooling 없음, Padding=1로 크기 유지)
+        # (H, W) -> Conv(pad=1) -> (H, W) 그대로 유지됨
+        conv_height = height
+        conv_width = width
         
-        self.flattened_size = 16 * pool_height * pool_width
+        self.flattened_size = 32 * conv_height * conv_width
         
         # [Layer 2] Hidden Fully Connected Layer
-        self.fc1 = nn.Linear(self.flattened_size, 64)
+        self.fc1 = nn.Linear(self.flattened_size, 128)
         
         # [Layer 3] Output Fully Connected Layer
-        # 최종적으로 각 큐비트의 에러 확률을 출력합니다.
-        self.fc_out = nn.Linear(64, num_classes)
+        self.fc_out = nn.Linear(128, num_classes)
 
     def forward(self, x):
-        # 1. Feature Extraction (Conv -> ReLU -> Pool)
+        # 1. Feature Extraction (Conv -> ReLU)
+        # 풀링(pool1) 과정이 빠졌습니다!
         x = self.conv1(x)
         x = F.relu(x)
-        x = self.pool1(x)
         
         # 2. Flatten (1D 벡터로 펼치기)
         x = torch.flatten(x, 1) 
