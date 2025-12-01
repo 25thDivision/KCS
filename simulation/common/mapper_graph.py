@@ -91,34 +91,45 @@ class SyndromeGraphMapper:
 
     def map_to_node_features(self, detector_data: np.ndarray) -> np.ndarray:
         """
-        [UPDATED] 신드롬 정보에 Stabilizer Type(One-hot)을 추가하여 노드 피처를 생성합니다
-        
-        Args:
-            detector_data (np.ndarray): [shots, num_detectors] 크기의 신드롬 데이터입니다
-            
-        Returns:
-            np.ndarray: [shots, num_nodes, 4] 크기의 노드 피처입니다
-                        (1채널: 신드롬 상태, 3채널: Stabilizer Type One-hot)
+        [UPDATED] 신드롬 + Stabilizer Type + 좌표(Coordinate) 정보를 모두 포함합니다.
+        Input Feature Dim: 1 (Syndrome) + 3 (Color) + 2 (Coord) = 6
         """
         shots = detector_data.shape[0]
         
-        # Feature 1: 신드롬 상태 (켜짐/꺼짐)
+        # 1. Syndrome Feature (Shape: [Batch, N, 1])
         syndrome_feat = np.zeros((shots, self.num_nodes, 1), dtype=np.float32)
         if detector_data.shape[1] >= self.num_nodes:
             syndrome_feat[:, :, 0] = detector_data[:, self.node_indices]
             
-        # Feature 2: Stabilizer Type (One-hot encoding: [1,0,0], [0,1,0], [0,0,1])
-        # 모든 샷(shot)에 대해 동일한 타입 정보를 복제하여 사용합니다
+        # 2. Stabilizer Type Feature (Shape: [Batch, N, 3])
         type_feat = np.zeros((shots, self.num_nodes, 3), dtype=np.float32)
-        
-        # 저장해둔 노드 타입을 One-hot 벡터로 변환합니다
-        type_one_hot = np.eye(3)[self.node_types] # shape: [num_nodes, 3]
-        
-        # 배치 차원으로 브로드캐스팅합니다
+        type_one_hot = np.eye(3)[self.node_types]
         type_feat[:] = type_one_hot
         
-        # 두 피처를 합칩니다: [Syndrome(1)] + [Type(3)] = 4 features
-        return np.concatenate([syndrome_feat, type_feat], axis=2)
+        # 3. [NEW] Coordinate Feature (Shape: [Batch, N, 2])
+        # 좌표 정보를 추가하여 GNN이 노드 간의 상대적 위치를 학습하게 돕습니다.
+        coord_feat = np.zeros((shots, self.num_nodes, 2), dtype=np.float32)
+        
+        # 저장해둔 좌표 딕셔너리에서 (x, y)를 꺼내 정규화(Normalize)하여 넣습니다.
+        # 정규화 안 하면 좌표값이 너무 커서 학습이 불안정해질 수 있습니다.
+        coords_list = []
+        for node_idx in self.node_indices:
+            # stim 좌표는 리스트 형태 [x, y, z...]일 수 있음. 앞 2개만 사용
+            c = self.coords_dict.get(node_idx, [0, 0])[:2]
+            coords_list.append(c)
+        
+        coords_array = np.array(coords_list, dtype=np.float32)
+        
+        # 최대 좌표값으로 나누어 0~1 사이로 정규화 (선택 사항이지만 권장)
+        max_val = np.max(np.abs(coords_array)) if len(coords_array) > 0 else 1.0
+        if max_val > 0:
+            coords_array /= max_val
+            
+        coord_feat[:] = coords_array
+        
+        # 4. 모든 피처 연결 (Concatenate)
+        # 최종 Shape: [Batch, Num_Nodes, 6]
+        return np.concatenate([syndrome_feat, type_feat, coord_feat], axis=2)
 
     def get_edges(self) -> np.ndarray:
         """

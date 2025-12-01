@@ -1,11 +1,18 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import sys
+import os
 
-# 커스텀 모듈 임포트
-from syndrome_gen import create_color_code_circuit, generate_dataset
-from mapper_image import SyndromeImageMapper
-from mapper_graph import SyndromeGraphMapper
+# [수정] 현재 폴더(simulation)와 상위 폴더(KCS)를 모두 경로에 추가
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)          # simulation 폴더 내 모듈용
+sys.path.append(os.path.join(current_dir, '../')) # models 폴더용
+
+# [수정] 바뀐 경로 Import
+from generators.color_code import create_color_code_circuit, generate_dataset
+from common.mapper_image import SyndromeImageMapper
+from common.mapper_graph import SyndromeGraphMapper
 
 # ==============================================================================
 # Configuration Parameters
