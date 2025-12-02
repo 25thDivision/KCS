@@ -7,9 +7,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
 
-# [Import] 공통 데이터셋 모듈
+# 공통 데이터셋 모듈
 from simulation.common.dataset import QECDataset
-# [Import] CNN 모델
+# CNN 모델
 from models.cnn import CNN
 
 # ==============================================================================
@@ -25,7 +25,7 @@ MODEL_SAVE_NAME = "cnn_d5_p0.05_best.pth"
 
 BATCH_SIZE = 128
 LEARNING_RATE = 1e-3
-EPOCHS = 10
+EPOCHS = 100
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def load_data(file_name):
