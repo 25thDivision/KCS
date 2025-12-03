@@ -1,0 +1,3 @@
+Model,Distance,Error_Rate(p),Best_ECR(%),Accuracy(%),Inference_Time(ms)
+CNN,5,0.05,54.19,46.85,0.0025
+GraphTransformer,5,0.05,96.70,94.68,0.0047

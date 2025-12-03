@@ -37,7 +37,6 @@ class CNN(nn.Module):
 
     def forward(self, x):
         # 1. Feature Extraction (Conv -> ReLU)
-        # 풀링(pool1) 과정이 빠졌습니다!
         x = self.conv1(x)
         x = F.relu(x)
         

@@ -1,5 +1,17 @@
-# Python 가상 환경 폴더 무시
+# Python 가상 환경 및 VS Code 폴더 무시
 .venv/
+.vscode/
 
 # 캐시 파일 무시
 __pycache__/
+
+# 모델 체크포인트 파일 무시
+saved_weights/
+*.pt
+*.pth
+
+# DataSet 관련 파일 무시
+DataSet/
+
+# 기타 등등
+Test_Results/
