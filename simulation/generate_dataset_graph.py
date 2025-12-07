@@ -68,7 +68,7 @@ def main():
     print(f"    - Graph Structure (Edges) saved to {edge_path}")
     
     # 3. 학습 데이터 (Train) 생성
-    save_dataset("train", NUM_TRAIN, NOISE_RATE_TRAIN, mapper)
+    save_dataset("train", NUM_TRAIN, NOISE_RATE_TRAIN, mapper)  
     
     # 4. 테스트 데이터 (Test) 생성
     # 벤치마킹을 위해 여러 노이즈 레벨로 만들 수도 있지만, 일단 하나만 만듭니다.
