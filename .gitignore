@@ -10,8 +10,7 @@ saved_weights/
 *.pt
 *.pth
 
-# DataSet 관련 파일 무시
-DataSet/
-
-# 기타 등등
-Test_Results/
+# dataset 관련 파일 무시
+dataset/
+*.npz
+*.npy

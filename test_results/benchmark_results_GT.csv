@@ -1,2 +1,3 @@
 Model,Distance,Error_Rate(p),Error_Type,Best_ECR(%),Accuracy(%),Inference_Time(ms),Max_Epochs,Learning_Rate,Batch_Size,Optimizer,Heads,Hidden_Dropout,Hidden_Dim,Layers,Alpha,Beta
 GraphTransformer,5,0.05,X,96.48,95.76,0.0079,1,0.0005,128,Adam,4,0.1,128,3,18.999999999999996,
+GraphTransformer,5,0.05,X,96.94,95.72,0.0073,20,0.0005,128,Adam,4,0.1,128,3,18.999999999999996,

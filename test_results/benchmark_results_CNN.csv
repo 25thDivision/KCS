@@ -1,2 +1,3 @@
 Model,Distance,Error_Rate(p),Error_Type,Best_ECR(%),Accuracy(%),Inference_Time(ms),Max_Epochs,Learning_Rate,Batch_Size,Optimizer,Kernel_Size,Layers
 CNN,5,0.05,X,57.16,43.57,0.0018,1,0.001,128,Adam,3x3,3 (1 Conv + 2 FC)
+CNN,5,0.05,X,57.16,0.00,0.0000,20,0.001,128,Adam,3x3,3 (1 Conv + 2 FC)

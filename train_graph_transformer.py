@@ -20,7 +20,7 @@ from models.graph_transformer import GraphTransformer
 MODEL_NAME = "GraphTransformer"
 DISTANCE = 5
 ERROR_RATE = 0.05
-ERROR_TYPE = "X" # [중요] X 또는 Z로 변경하며 실험하세요
+ERROR_TYPE = "Z" # [중요] X 또는 Z로 변경하며 실험하세요
 
 # [데이터셋 경로]
 DATASET_DIR = "dataset/color_code/graph"

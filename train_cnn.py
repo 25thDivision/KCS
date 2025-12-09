@@ -18,7 +18,7 @@ from models.cnn import CNN
 MODEL_NAME = "CNN"
 DISTANCE = 5
 ERROR_RATE = 0.05
-ERROR_TYPE = "X"
+ERROR_TYPE = "Z"
 
 DATASET_DIR = "dataset/color_code/image"
 TRAIN_FILE = f"train_d{DISTANCE}_p{ERROR_RATE}_{ERROR_TYPE}.npz"
