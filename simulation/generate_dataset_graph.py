@@ -1,80 +1,97 @@
 import os
 import sys
 import numpy as np
-import stim
 from tqdm import tqdm
 
-# [수정] 현재 폴더(simulation)를 경로에 추가해서 하위 모듈을 찾게 함
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# [수정] 바뀐 경로에 맞춰 Import
 from generators.color_code import create_color_code_circuit, generate_dataset
 from common.mapper_graph import SyndromeGraphMapper
 
 # ==============================================================================
-# 설정 (Configuration)
+# [설정] 대용량 데이터 생성 (Train + Test)
 # ==============================================================================
-DISTANCE = 5
-ROUNDS = 5
-NOISE_RATE_TRAIN = 0.05  # 학습용 노이즈 (조금 어렵게 설정하는 것이 일반적)
-NUM_TRAIN = 100000       # 학습 데이터 개수 (예: 10만 개)
-NUM_TEST = 10000         # 테스트 데이터 개수 (예: 1만 개)
+TRAIN_SAMPLES = {
+    3: 10000000, 
+    5: 1000000, 
+    7: 1000000
+}
+
+TEST_SAMPLES = {
+    3: 100000,
+    5: 100000,
+    7: 100000
+}
+
+BATCH_SIZE = 100000 
+
+NOISE_RATES = [0.005, 0.01, 0.05]
+ERROR_TYPES = ["X", "Z"]
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(CURRENT_DIR, "../dataset/color_code/graph")     # 저장할 폴더 경로
+OUTPUT_DIR = os.path.join(CURRENT_DIR, "../dataset/color_code/graph")
 
-def save_dataset(mode, num_samples, noise_rate, mapper):
-    print(f"\n>>> Generating {mode} set ({num_samples} samples, p={noise_rate})...")
+def generate_and_save(mapper, d, p, err_type, total_samples, file_prefix):
+    all_features = []
+    all_labels = []
     
-    # 1. Raw Data 생성 (Stim)
-    # 메모리 부족 방지를 위해 1만 개씩 끊어서 처리할 수도 있지만, 
-    # 일단 10만 개 정도는 메모리에 올라가므로 한 번에 합니다.
-    raw_detectors, physical_errors = generate_dataset(DISTANCE, ROUNDS, noise_rate, num_samples)
+    num_batches = int(np.ceil(total_samples / BATCH_SIZE))
+    desc = f"       [{file_prefix.upper()}] ({err_type}, p={p})"
     
-    # 2. Graph Feature 변환
-    print(f"    - Converting to Graph Features...")
-    node_features = mapper.map_to_node_features(raw_detectors)
+    for b in tqdm(range(num_batches), desc=desc):
+        current_batch_size = min(BATCH_SIZE, total_samples - b * BATCH_SIZE)
+        
+        raw_detectors, physical_errors = generate_dataset(
+            d, d, p, current_batch_size, error_type=err_type
+        )
+        
+        features = mapper.map_to_node_features(raw_detectors)
+        
+        all_features.append(features)
+        all_labels.append(physical_errors)
     
-    # 3. 저장
-    file_path = os.path.join(OUTPUT_DIR, f"{mode}_d{DISTANCE}_p{noise_rate}.npz")
+    full_features = np.concatenate(all_features, axis=0)
+    full_labels = np.concatenate(all_labels, axis=0)
     
-    # 압축 저장 (.npz)
+    file_name = f"{file_prefix}_d{d}_p{p}_{err_type}.npz"
+    file_path = os.path.join(OUTPUT_DIR, file_name)
+    
     np.savez_compressed(
         file_path,
-        features=node_features,  # 입력 (X)
-        labels=physical_errors   # 정답 (Y)
+        features=full_features,
+        labels=full_labels
     )
-    print(f"    - Saved to {file_path}")
-    print(f"      X shape: {node_features.shape}, Y shape: {physical_errors.shape}")
+    print(f"       Saved: {file_name} (Shape: {full_features.shape})")
 
 def main():
-    # 저장 폴더 생성
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
         
-    print(f"=== Generating Dataset for Graph Transformer (d={DISTANCE}) ===")
+    print(f"=== Generating Graph Datasets (Train & Test) ===")
     
-    # 1. Mapper 초기화 (회로 구조 분석용, 한 번만 하면 됨)
-    print(">>> Initializing Circuit and Mapper...")
-    # 회로 구조용 (노이즈는 상관없음)
-    circuit = create_color_code_circuit(DISTANCE, ROUNDS, 0.001)
-    mapper = SyndromeGraphMapper(circuit)
-    
-    # 2. 엣지 정보(Adjacency Matrix) 저장 
-    # (그래프 구조는 모든 데이터에서 똑같으므로 따로 저장합니다)
-    edge_index = mapper.get_edges()
-    edge_path = os.path.join(OUTPUT_DIR, f"edges_d{DISTANCE}.npy")
-    np.save(edge_path, edge_index)
-    print(f"    - Graph Structure (Edges) saved to {edge_path}")
-    
-    # 3. 학습 데이터 (Train) 생성
-    save_dataset("train", NUM_TRAIN, NOISE_RATE_TRAIN, mapper)  
-    
-    # 4. 테스트 데이터 (Test) 생성
-    # 벤치마킹을 위해 여러 노이즈 레벨로 만들 수도 있지만, 일단 하나만 만듭니다.
-    save_dataset("test", NUM_TEST, NOISE_RATE_TRAIN, mapper)
-    
-    print("\n=== All Datasets Generated Successfully! ===")
+    for d, train_count in TRAIN_SAMPLES.items():
+        test_count = TEST_SAMPLES[d]
+        print(f"\n>>> Processing Distance d={d} (Train: {train_count}, Test: {test_count})")
+        
+        circuit = create_color_code_circuit(d, d, 0.001)
+        mapper = SyndromeGraphMapper(circuit)
+        
+        # 엣지 정보 저장 (한 번만)
+        edge_path = os.path.join(OUTPUT_DIR, f"edges_d{d}.npy")
+        np.save(edge_path, mapper.get_edges())
+        print(f"    - Saved Edges: {edge_path}")
+
+        for p in NOISE_RATES:
+            for err_type in ERROR_TYPES:
+                print(f"    -> Processing {err_type}-Error (p={p})...")
+                
+                # 1. Train 생성
+                # generate_and_save(mapper, d, p, err_type, train_count, "train")
+                
+                # 2. Test 생성 (필수!)
+                generate_and_save(mapper, d, p, err_type, test_count, "test")
+
+    print("\n=== All Graph Datasets Generated Successfully! ===")
 
 if __name__ == "__main__":
     main()
