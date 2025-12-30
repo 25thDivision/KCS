@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import torch
 import torch.nn as nn
@@ -19,29 +18,32 @@ from models.graph_transformer import GraphTransformer
 # ==============================================================================
 MODEL_NAME = "GraphTransformer"
 DISTANCE = 3
-ERROR_RATE = 0.05
-ERROR_TYPE = "Z"
+ERROR_RATE = 0.005
+ERROR_TYPE = "X"
+
+NUM_WORKERS = 8
 
 DATASET_DIR = "dataset/color_code/graph"
 TRAIN_FILE = f"train_d{DISTANCE}_p{ERROR_RATE}_{ERROR_TYPE}.npz"
 TEST_FILE  = f"test_d{DISTANCE}_p{ERROR_RATE}_{ERROR_TYPE}.npz"
+EDGE_FILE = f"edges_d{DISTANCE}.npy"
 
 MODEL_SAVE_DIR = "saved_weights/graph_transformer"
 CHECKPOINT_NAME = f"checkpoint_gt_d{DISTANCE}_p{ERROR_RATE}_{ERROR_TYPE}.pth"
 BEST_MODEL_NAME = f"best_gt_d{DISTANCE}_p{ERROR_RATE}_{ERROR_TYPE}.pth"
 RESULT_LOG_FILE = "test_results/benchmark_results_GT.csv"
 
-# [학습 하이퍼파라미터] - GNN과 동일하게
-BATCH_SIZE = 128
-LEARNING_RATE = 1e-3
+# [학습 하이퍼파라미터]
+BATCH_SIZE = 1024
+LEARNING_RATE = 1e-4
 MAX_EPOCHS = 20
 PATIENCE = 3
 OPTIMIZER_NAME = "Adam"
 
 # [모델 구조 하이퍼파라미터]
-GT_D_MODEL = 64
+GT_D_MODEL = 256
 GT_NUM_HEADS = 4
-GT_NUM_LAYERS = 3
+GT_NUM_LAYERS = 5
 GT_DROPOUT = 0.1
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -82,21 +84,31 @@ def load_checkpoint(model, optimizer, filename):
         print(">>> 체크포인트 없음. 처음부터 시작합니다.")
         return 0, 0.0, 0
 
-def train_one_epoch(model, loader, optimizer, criterion, device):
+def load_edges(file_name):
+    path = os.path.join(DATASET_DIR, file_name)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"엣지 파일 없음: {path}\n generate_dataset_graph.py를 먼저 실행하세요.")
+    edges = np.load(path)
+    # PyTorch LongTensor로 변환 및 GPU로 이동 준비
+    return torch.LongTensor(edges).to(DEVICE)
+
+def train_one_epoch(model, loader, optimizer, criterion, device, edge_index): 
     model.train()
     total_loss = 0.0
-    for inputs, labels in tqdm(loader, desc="Training", leave=False):
+    for inputs, labels in tqdm(loader, desc="Training Epoch", leave=False):
         inputs, labels = inputs.to(device), labels.to(device)
         optimizer.zero_grad()
-        outputs = model(inputs)
+        
+        # edge_index 전달
+        outputs = model(inputs, edge_index) 
+        
         loss = criterion(outputs, labels)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         total_loss += loss.item()
     return total_loss / len(loader)
 
-def evaluate(model, loader, criterion, device):
+def evaluate(model, loader, criterion, device, edge_index):
     model.eval()
     total_loss = 0.0
     total_error_bits = 0
@@ -110,7 +122,7 @@ def evaluate(model, loader, criterion, device):
         for inputs, labels in tqdm(loader, desc="Evaluating", leave=False):
             inputs, labels = inputs.to(device), labels.to(device)
             start_time = time.time()
-            outputs = model(inputs)
+            outputs = model(inputs, edge_index)
             end_time = time.time()
             total_inference_time += (end_time - start_time)
             total_samples += inputs.size(0)
@@ -132,29 +144,37 @@ def evaluate(model, loader, criterion, device):
     
     return avg_loss, ecr, accuracy, avg_inference_time_ms
 
-def log_results(model_name, d, p, err_type, ecr, acc, inf_time, 
-                epochs, lr, batch, opt, d_model, heads, layers):
+# [수정] 매 Epoch마다 로그를 저장하는 함수
+def log_epoch_result(epoch, train_loss, val_loss, val_ecr, val_acc, val_time, lr):
     log_dir = os.path.dirname(RESULT_LOG_FILE)
     if log_dir and not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
     file_exists = os.path.isfile(RESULT_LOG_FILE)
+    
+    # 파일을 append 모드로 엽니다.
     with open(RESULT_LOG_FILE, mode='a', newline='') as f:
         writer = csv.writer(f)
+        # 파일이 처음 생성될 때만 헤더 작성
         if not file_exists:
             headers = [
-                "Model", "Distance", "Error_Rate(p)", "Error_Type", 
-                "Best_ECR(%)", "Accuracy(%)", "Inference_Time(ms)",
-                "Max_Epochs", "Learning_Rate", "Batch_Size", "Optimizer", 
-                "D_Model", "Num_Heads", "Num_Layers"
+                "Distance", "Error_Rate(p)", "Error_Type", 
+                "Best_ECR(%)", "Accuracy(%)", "Inference_Time(ms)", # Best_ECR(%) 컬럼에 현재 ECR 저장
+                "Epochs", "Learning_Rate", "Train_Loss", "Val_Loss"
             ]
             writer.writerow(headers)
+        
+        # 데이터 작성
         writer.writerow([
-            model_name, d, p, err_type, 
-            f"{ecr:.2f}", f"{acc:.2f}", f"{inf_time:.4f}",
-            epochs, lr, batch, opt, d_model, heads, layers
+            DISTANCE, ERROR_RATE, ERROR_TYPE,
+            f"{val_ecr*100:.2f}",  # 현재 Epoch의 ECR (%)
+            f"{val_acc*100:.2f}",  # 현재 Epoch의 Accuracy (%)
+            f"{val_time:.4f}",     # Inference Time (ms)
+            epoch,                 # 현재 Epoch
+            lr,                    # Learning Rate
+            f"{train_loss:.4f}"    # Train Loss
+            f"{val_loss:.4f}"      # Val Loss 추가
         ])
-    print(f"\n>>> 📝 상세 결과가 '{RESULT_LOG_FILE}'에 저장되었습니다.")
 
 def main():
     print(f"=== {MODEL_NAME} Training (d={DISTANCE}, p={ERROR_RATE}, Type={ERROR_TYPE}) ===")
@@ -162,8 +182,22 @@ def main():
     X_train, y_train = load_data(TRAIN_FILE)
     X_test, y_test = load_data(TEST_FILE)
     
-    train_loader = DataLoader(QECDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=True)
-    test_loader = DataLoader(QECDataset(X_test, y_test), batch_size=BATCH_SIZE, shuffle=False)
+    edge_index = load_edges(EDGE_FILE)
+    
+    train_loader = DataLoader(
+        QECDataset(X_train, y_train), 
+        batch_size=BATCH_SIZE, 
+        shuffle=True, 
+        num_workers=NUM_WORKERS,
+        pin_memory=True
+    )
+    test_loader = DataLoader(
+        QECDataset(X_test, y_test), 
+        batch_size=BATCH_SIZE, 
+        shuffle=False, 
+        num_workers=NUM_WORKERS,
+        pin_memory=True
+    )
     
     model = GraphTransformer(
         num_nodes=X_train.shape[1], 
@@ -192,13 +226,22 @@ def main():
     print(f">>> 학습 시작 ({start_epoch+1} ~ {MAX_EPOCHS} Epochs)...")
     
     for epoch in range(start_epoch, MAX_EPOCHS):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, DEVICE)
-        val_loss, val_ecr, val_acc, val_time = evaluate(model, test_loader, criterion, DEVICE)
+        # 1. 학습
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, DEVICE, edge_index)
+        
+        # 2. 평가
+        val_loss, val_ecr, val_acc, val_time = evaluate(model, test_loader, criterion, DEVICE, edge_index)
         
         print(f"Epoch [{epoch+1}/{MAX_EPOCHS}] "
-              f"Loss: {train_loss:.4f} | ECR: {val_ecr:.2%} | Acc: {val_acc:.2%} | "
+              f"Loss(T/V): {train_loss:.4f}/{val_loss:.4f} | "  # Train/Val Loss 비교
+              f"ECR: {val_ecr:.2%} | Acc: {val_acc:.2%} | "
+              f"Time: {val_time:.2f}ms | "                       # 추론 시간 표시
               f"Patience: {patience_counter}/{PATIENCE}")
         
+        # 3. [추가] 로그 저장 (매 Epoch 마다)
+        log_epoch_result(epoch + 1, train_loss, val_loss, val_ecr, val_acc, val_time, LEARNING_RATE)
+
+        # 4. 체크포인트 및 Early Stopping
         if val_ecr > best_ecr:
             best_ecr = val_ecr
             best_acc = val_acc
@@ -214,14 +257,8 @@ def main():
                 print(f"\n>>> 🛑 Early Stopping 발동! (Epoch {epoch+1})")
                 break
 
-    print(f"\n>>> 학습 종료. 최종 Best ECR: {best_ecr:.2%}, Accuracy: {best_acc:.2%}")
-    
-    log_results(
-        MODEL_NAME, DISTANCE, ERROR_RATE, ERROR_TYPE, 
-        best_ecr*100, best_acc*100, best_inf_time,
-        MAX_EPOCHS, LEARNING_RATE, BATCH_SIZE, OPTIMIZER_NAME, 
-        GT_D_MODEL, GT_NUM_HEADS, GT_NUM_LAYERS
-    )
+    print(f"\n>>> 학습 종료. Best ECR: {best_ecr:.2%}, Acc: {best_acc:.2%}, Time: {best_inf_time:.4f}ms")
+    # 마지막 요약 로그는 더 이상 중복 저장하지 않음 (루프 안에서 이미 다 저장됨)
 
 if __name__ == "__main__":
     main()
