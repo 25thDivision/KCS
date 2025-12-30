@@ -16,8 +16,8 @@ from models.cnn import CNN
 # 설정 (CNN 전용)
 # ==============================================================================
 MODEL_NAME = "CNN"
-DISTANCE = 5
-ERROR_RATE = 0.05
+DISTANCE = 3
+ERROR_RATE = 0.005
 ERROR_TYPE = "Z"
 
 DATASET_DIR = "dataset/color_code/image"
