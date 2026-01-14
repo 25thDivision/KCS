@@ -108,7 +108,7 @@ PATIENCE = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # 5. 디스코드 웹후크 설정
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1461022470873026834/TSFA-3N-nYTyt3xQJIMQuO1SDXRYmgFnX3i2UeFcNZYQBKWFo61oFy3-e1maoYKSIOxa" 
+
 
 
 # ==============================================================================
