@@ -33,7 +33,7 @@ except ImportError:
 # 1. 실행할 모델 및 하이퍼파라미터 정의
 MODEL_CONFIGS = {
     "CNN": {
-        "enabled": True,
+        "enabled": False,  # False임! 확인!
         "type": "image",
         "batch_size": 256,
         "lr": 1e-3,
@@ -51,7 +51,7 @@ MODEL_CONFIGS = {
         }
     },
     "GNN": {
-        "enabled": True,
+        "enabled": False,  # False임! 확인!
         "type": "graph",
         "batch_size": 512,
         "lr": 1e-3,
@@ -75,7 +75,7 @@ MODEL_CONFIGS = {
         }
     },
     "GraphMamba": {
-        "enabled": False if GraphMamba else False,
+        "enabled": False if GraphMamba else False,      # False임! 확인!
         "type": "graph",
         "batch_size": 256,
         "lr": 1e-4,
@@ -89,11 +89,14 @@ MODEL_CONFIGS = {
 }
 
 # 2. 실험 조건
-DISTANCES = [3, 5, 7]
+# DISTANCES = [3, 5, 7]
+DISTANCES = [7]         # 7임! 확인!
 ERROR_RATES = [0.005, 0.01, 0.05]
-ERROR_TYPES = ["X", "Z"]
+# ERROR_TYPES = ["X", "Z"]
+ERROR_TYPES = ["X"]     # X임! 확인!
+
 # 2-1. 실험 환경
-NUM_WORKERS = min(16, os.cpu_count() - 2) if os.cpu_count() else 0
+NUM_WORKERS = min(8, os.cpu_count() - 2) if os.cpu_count() else 0
 
 # 3. 경로 설정
 BASE_DATA_DIR = "dataset/color_code"
@@ -107,9 +110,22 @@ MAX_EPOCHS = 20
 PATIENCE = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# 5. 디스코드 웹후크 설정
+# 5. Discord Webhook 설정
+def load_webhook_url():
+    key_file = "credentials.json"
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, "r") as f:
+                data = json.load(f)
+                return data.get("discord_webhook_url", "")
+        except Exception as e:
+            print(f"⚠️ Failed to load credentials.json: {e}")
+            return ""
+    else:
+        print("⚠️ credentials.json not found. Discord alerts disabled.")
+        return ""
 
-
+DISCORD_WEBHOOK_URL = load_webhook_url()
 
 # ==============================================================================
 # 🛠️ 유틸리티 함수

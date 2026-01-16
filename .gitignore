@@ -14,3 +14,9 @@ saved_weights/
 dataset/
 *.npz
 *.npy
+
+# 비밀 키 파일 무시
+credentials.json
+
+# 로그 파일 무시
+*.log
