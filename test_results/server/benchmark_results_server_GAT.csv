@@ -1,0 +1,2 @@
+Distance,Error_Rate(p),Error_Type,Best_ECR(%),Accuracy(%),Inference_Time(ms),Epochs,Learning_Rate,Train_Loss,Val_Loss
+3,0.005,X,99.02,98.90,0.0015,1,0.001,0.061812,0.038281

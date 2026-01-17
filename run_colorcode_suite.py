@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch_geometric.utils import to_dense_adj
 from tqdm.auto import tqdm
 import numpy as np
 import csv
@@ -17,14 +18,14 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # --- 커스텀 모듈 임포트 ---
 from simulation.common.dataset import QECDataset
 from models.cnn import CNN
-from models.gnn import GNN
 from models.unet import UNet
+from models.gcn import GCN
+from models.gcnii import GCNII
+from models.gat import GAT
+from models.appnp import APPNP
+from models.gnn import GNN
 from models.graph_transformer import GraphTransformer
-try:
-    from models.graph_mamba import GraphMamba
-except ImportError:
-    GraphMamba = None
-    print("⚠️ GraphMamba(mamba-ssm) is not installed. Skipping related models.")
+from models.graph_mamba import GraphMamba
 
 # ==============================================================================
 # ⚙️ [User Config] 하이퍼파라미터 & 설정 관리
@@ -35,6 +36,7 @@ MODEL_CONFIGS = {
     "CNN": {
         "enabled": False,  # False임! 확인!
         "type": "image",
+        "use_adj": False,
         "batch_size": 256,
         "lr": 1e-3,
         "loss_weight": "linear", # (1-p)/p
@@ -43,6 +45,7 @@ MODEL_CONFIGS = {
     "UNet": {
         "enabled": False,  # False임! 확인!
         "type": "image",
+        "use_adj": False,
         "batch_size": 128,
         "lr": 1e-3,
         "loss_weight": "linear",
@@ -50,9 +53,64 @@ MODEL_CONFIGS = {
             "base_filters": 32
         }
     },
+    "GCN": {
+        "enabled": False,
+        "type": "graph",
+        "use_adj": True,
+        "batch_size": 256,
+        "lr": 1e-3,
+        "loss_weight": "linear",
+        "params": {
+            "hidden_dim": 16,
+            "num_layers": 4
+        }
+    },
+    "GCNII": {
+        "enabled": False,
+        "type": "graph",
+        "use_adj": True,
+        "batch_size": 256,
+        "lr": 1e-3,
+        "loss_weight": "linear",
+        "params": {
+            "hidden_dim": 16,
+            "num_layers": 16,
+            "alpha": 0.1,
+            "theta": 0.5,
+            "dropout": 0.1
+        }
+    },
+    "GAT": {
+        "enabled": False,
+        "type": "graph",
+        "use_adj": True,
+        "batch_size": 256,
+        "lr": 1e-3,
+        "loss_weight": "linear",
+        "params": {
+            "hidden_dim": 16, # 헤드가 4개면 총 32*4=128차원
+            "heads": 4,
+            "num_layers": 4,
+            "dropout": 0.1
+        }
+    },
+    "APPNP": {
+        "enabled": False,
+        "type": "graph",
+        "use_adj": True,
+        "batch_size": 256,
+        "lr": 1e-3,
+        "loss_weight": "linear",
+        "params": {
+            "hidden_dim": 16,
+            "K": 10,       # 전파 횟수
+            "alpha": 0.1   # Teleport 확률
+        }
+    },
     "GNN": {
         "enabled": False,  # False임! 확인!
         "type": "graph",
+        "use_adj": False,
         "batch_size": 512,
         "lr": 1e-3,
         "loss_weight": "linear",
@@ -62,8 +120,9 @@ MODEL_CONFIGS = {
         }
     },
     "GraphTransformer": {
-        "enabled": True,
+        "enabled": False,  # False임! 확인!
         "type": "graph",
+        "use_adj": False,
         "batch_size": 256, 
         "lr": 1e-4,
         "loss_weight": "sqrt", # sqrt((1-p)/p)
@@ -75,8 +134,9 @@ MODEL_CONFIGS = {
         }
     },
     "GraphMamba": {
-        "enabled": False if GraphMamba else False,      # False임! 확인!
+        "enabled": True,
         "type": "graph",
+        "use_adj": False,
         "batch_size": 256,
         "lr": 1e-4,
         "loss_weight": "sqrt",
@@ -89,14 +149,15 @@ MODEL_CONFIGS = {
 }
 
 # 2. 실험 조건
-# DISTANCES = [3, 5, 7]
-DISTANCES = [7]         # 7임! 확인!
+DISTANCES = [3, 5, 7]
 ERROR_RATES = [0.005, 0.01, 0.05]
 # ERROR_TYPES = ["X", "Z"]
-ERROR_TYPES = ["X"]     # X임! 확인!
+ERROR_TYPES = ["X"]
 
 # 2-1. 실험 환경
-NUM_WORKERS = min(8, os.cpu_count() - 2) if os.cpu_count() else 0
+# NUM_WORKERS = min(8, os.cpu_count() - 2) if os.cpu_count() else 0
+NUM_WORKERS = 0
+AUTOCAST = False
 
 # 3. 경로 설정
 BASE_DATA_DIR = "dataset/color_code"
@@ -144,9 +205,9 @@ def send_discord_alert(model_name, d, p, err_type, ecr, acc, time_ms, best_epoch
                     {"name": "Best ECR", "value": f"{ecr:.2f}%", "inline": True},
                     {"name": "Best Acc", "value": f"{acc:.2f}%", "inline": True},
                     {"name": "Best Epoch", "value": f"{best_epoch}", "inline": True},
-                    {"name": "Inf. Time", "value": f"{time_ms:.4f} ms", "inline": True}
+                    {"name": "Best Inf. Time", "value": f"{time_ms:.4f} ms", "inline": True}
                 ],
-                "footer": {"text": "My Lab Server"}
+                "footer": {"text": "STL Lab Server"}
             }]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=5)
@@ -178,6 +239,26 @@ def get_model_instance(model_name, config, input_shape, num_qubits):
         # UNet은 보통 (N, C, H, W) 입력을 받아 (N, OutC, H, W) 혹은 Flatten 출력을 내보냄
         # models/unet.py의 구현에 따라 초기화 인자가 다를 수 있음 (일반적인 파라미터 적용)
         return UNet(in_ch=1, out_ch=num_qubits, base_filters=params.get("base_filters", 32))
+    
+    elif model_name == "GCN":
+        return GCN(num_nodes=input_shape[0], in_channels=input_shape[1], num_qubits=num_qubits, 
+                   hidden_dim=params["hidden_dim"], num_layers=params["num_layers"])
+    
+    elif model_name == "GCNII":
+        return GCNII(num_nodes=input_shape[0], in_channels=input_shape[1], num_qubits=num_qubits,
+                     hidden_dim=params["hidden_dim"], num_layers=params["num_layers"],
+                     alpha=params["alpha"], theta=params["theta"], 
+                     dropout=params["dropout"])
+    
+    elif model_name == "GAT":
+        return GAT(num_nodes=input_shape[0], in_channels=input_shape[1], num_qubits=num_qubits, 
+                   hidden_dim=params["hidden_dim"], heads=params["heads"], 
+                   num_layers=params["num_layers"], dropout=params["dropout"])
+    
+    elif model_name == "APPNP":
+        return APPNP(num_nodes=input_shape[0], in_channels=input_shape[1], num_qubits=num_qubits,
+                          hidden_dim=params["hidden_dim"], K=params["K"], 
+                          alpha=params["alpha"])
     
     elif model_name == "GNN":
         # input: (Nodes, Feats)
@@ -222,6 +303,40 @@ def save_checkpoint(model, optimizer, epoch, ecr, model_name, d, p, err_type):
     }
     torch.save(state, path)
 
+class FastTensorDataLoader:
+    """
+    GPU에 있는 텐서를 배치 단위로 통째로 잘라서(Slicing) 반환하는 초고속 로더
+    DataLoader보다 100배 빠름 (GPU Resident Dataset 전용)
+    """
+    def __init__(self, *tensors, batch_size=32, shuffle=False):
+        assert all(t.shape[0] == tensors[0].shape[0] for t in tensors)
+        self.tensors = tensors
+        self.dataset_len = self.tensors[0].shape[0]
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+    def __iter__(self):
+        if self.shuffle:
+            # GPU 상에서 인덱스만 섞어서 텐서 재정렬 (매우 빠름)
+            indices = torch.randperm(self.dataset_len, device=self.tensors[0].device)
+            self.tensors = [t[indices] for t in self.tensors]
+        
+        self.current_idx = 0
+        return self
+
+    def __next__(self):
+        if self.current_idx >= self.dataset_len:
+            raise StopIteration
+            
+        # 슬라이싱으로 한 번에 가져옴 (병목 없음)
+        end_idx = min(self.current_idx + self.batch_size, self.dataset_len)
+        batch = [t[self.current_idx:end_idx] for t in self.tensors]
+        self.current_idx += self.batch_size
+        return batch
+    
+    def __len__(self):
+        return (self.dataset_len + self.batch_size - 1) // self.batch_size
+
 # ==============================================================================
 # 🚀 학습 및 평가 코어 함수
 # ==============================================================================
@@ -229,27 +344,75 @@ def train_and_evaluate(model, train_loader, test_loader, edge_index, criterion, 
     best_stats = {"ecr": 0.0, "acc": 0.0, "time": 0.0, "epoch": 0}
     patience_counter = 0
     is_graph = (config["type"] == "graph")
+    use_adj = (config["use_adj"])
     lr = config["lr"]
 
+    if use_adj:
+        adj = None
+        
+        # 노드 개수 파악 (d=3 -> 9, d=5 -> 25 등)
+        num_nodes = train_loader.tensors[0].shape[1] 
+        
+        # Dense 변환
+        adj = to_dense_adj(edge_index, max_num_nodes=num_nodes)[0] # (N, N)
+        
+        # Self-loop: 자기 자신(Diagonal)에도 1을 더해줘야 내 정보도 유지됨! (A = A + I)
+        # 이미 1이면 그대로 두고, 0이면 1로 만듦
+        eye = torch.eye(num_nodes, device=DEVICE)
+        adj = adj + eye
+        adj = (adj > 0).float() # 혹시 2가 되면 1로 맞춤
+    
+    
+    if AUTOCAST:
+        # AMP Scaler 초기화 (학습 가속용)
+        scaler = torch.amp.GradScaler("cuda")
+
     for epoch in range(1, MAX_EPOCHS + 1):
-        # --- Training ---
         model.train()
         train_loss = 0.0
         
-        # tqdm progress bar (leave=False: 완료 시 사라짐 -> 로그 깔끔하게 유지)
         pbar = tqdm(train_loader, desc=f"Ep {epoch} Train", leave=False)
+        
+        # --- Training ---
         for inputs, labels in pbar:
             inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
             optimizer.zero_grad()
             
-            if is_graph:
-                outputs = model(inputs, edge_index)
-            else:
-                outputs = model(inputs)
+            # GPU 메모리에서 꺼낸 뒤, 연산을 위해 Float으로 변환
+            inputs = inputs.float()
+            labels = labels.float()
+            
+            if AUTOCAST:
+                # Autocast: 연산을 FP16으로 수행
+                with torch.amp.autocast("cuda"):
+                    if is_graph:
+                        outputs = model(inputs, edge_index)
+                    else:
+                        outputs = model(inputs)
+                    loss = criterion(outputs, labels)
                 
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+                # Scaler를 통한 역전파 (Loss Scaling)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            
+            else:
+                # 일반 FP32 연산
+                if use_adj:
+                    # GCN, GCNII, GAT, APPNP -> (Inputs, Adj) 전달
+                    outputs = model(inputs, adj)
+                elif is_graph:
+                    # GraphTransformer, GraphMamba 등 -> (Inputs)만 전달
+                    outputs = model(inputs, edge_index)
+                else:
+                    # CNN, UNet -> (Inputs)만 전달
+                    outputs = model(inputs)
+            
+                loss = criterion(outputs, labels)
+            
+                loss.backward()
+                optimizer.step()
+            
             train_loss += loss.item()
         
         avg_train_loss = train_loss / len(train_loader)
@@ -266,12 +429,18 @@ def train_and_evaluate(model, train_loader, test_loader, edge_index, criterion, 
         
         with torch.no_grad():
             for inputs, labels in test_loader:
-                inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
+                inputs = inputs.float()
+                labels = labels.float()
                 
                 start = time.time()
-                if is_graph:
+                if use_adj:
+                    # GCN, GCNII, GAT, APPNP -> (Inputs, Adj) 전달
+                    outputs = model(inputs, adj)
+                elif is_graph:
+                    # GraphTransformer, GraphMamba 등 -> (Inputs)만 전달
                     outputs = model(inputs, edge_index)
                 else:
+                    # CNN, UNet -> (Inputs)만 전달
                     outputs = model(inputs)
                 end = time.time()
                 
@@ -309,6 +478,8 @@ def train_and_evaluate(model, train_loader, test_loader, edge_index, criterion, 
             if patience_counter >= PATIENCE:
                 print("   -> 🛑 Early Stopping")
                 break
+        
+        torch.cuda.empty_cache()
                 
     return best_stats
 
@@ -342,6 +513,14 @@ def main():
                     if X_train is None:
                         print(f"    ⚠️ Data missing ({train_f}). Skipping.")
                         continue
+                    else:
+                        print(f"    ✅ Data loaded: Train {X_train.shape}, Test {X_test.shape}")
+                        print(f"       Now transferring data to {DEVICE}...")
+                        
+                        X_train = torch.from_numpy(np.copy(X_train)).to(torch.uint8).to(DEVICE)
+                        y_train = torch.from_numpy(np.copy(y_train)).to(torch.uint8).to(DEVICE)
+                        X_test = torch.from_numpy(np.copy(X_test)).to(torch.uint8).to(DEVICE)
+                        y_test = torch.from_numpy(np.copy(y_test)).to(torch.uint8).to(DEVICE)
                     
                     edge_index = None
                     if config["type"] == "graph":
@@ -352,11 +531,15 @@ def main():
                             print(f"    ⚠️ Edge file missing ({edge_f}). Skipping.")
                             continue
 
-                    # 2. DataLoader (pin_memory=True, NUM_WORKERS 적용)
-                    train_loader = DataLoader(QECDataset(X_train, y_train), batch_size=config["batch_size"], 
-                                              shuffle=True, num_workers=NUM_WORKERS, pin_memory=True)
-                    test_loader = DataLoader(QECDataset(X_test, y_test), batch_size=config["batch_size"], 
-                                             shuffle=False, num_workers=NUM_WORKERS, pin_memory=True)
+                    # 2. DataLoader (pin_memory=False, NUM_WORKERS 적용)
+                    # train_loader = DataLoader(QECDataset(X_train, y_train), batch_size=config["batch_size"], 
+                    #                           shuffle=True, num_workers=NUM_WORKERS, pin_memory=False)
+                    # test_loader = DataLoader(QECDataset(X_test, y_test), batch_size=config["batch_size"], 
+                    #                          shuffle=False, num_workers=NUM_WORKERS, pin_memory=False)
+                    
+                    # 2. FastTensorDataLoader 사용 (GPU Resident Dataset 전용)
+                    train_loader = FastTensorDataLoader(X_train, y_train, batch_size=config["batch_size"], shuffle=True)
+                    test_loader = FastTensorDataLoader(X_test, y_test, batch_size=config["batch_size"], shuffle=False)
                     
                     # 3. 모델 초기화
                     input_shape = X_train.shape[1:] 
@@ -365,6 +548,13 @@ def main():
                     model = get_model_instance(model_name, config, input_shape, num_qubits)
                     if model is None: continue
                     model = model.to(DEVICE)
+                    
+                    # 3-1. 컴파일 설정
+                    # try:
+                    #     print(f"   ⚡ Compiling {model_name} for speedup...")
+                    #     model = torch.compile(model) 
+                    # except Exception as e:
+                    #     print(f"   ⚠️ Compilation failed (proceeding without it): {e}")
                     
                     # 4. Loss Weighting 설정
                     if config["loss_weight"] == "sqrt":
