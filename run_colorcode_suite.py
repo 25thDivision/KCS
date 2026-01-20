@@ -149,8 +149,10 @@ MODEL_CONFIGS = {
 }
 
 # 2. 실험 조건
-DISTANCES = [3, 5, 7]
-ERROR_RATES = [0.005, 0.01, 0.05]
+# DISTANCES = [3, 5, 7]
+DISTANCES = [7]
+# ERROR_RATES = [0.005, 0.01, 0.05]
+ERROR_RATES = [0.05]
 # ERROR_TYPES = ["X", "Z"]
 ERROR_TYPES = ["X"]
 
