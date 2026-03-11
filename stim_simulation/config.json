@@ -5,7 +5,6 @@
         "error_types": ["X", "Z"],
         "max_epochs": 20,
         "patience": 3,
-        "num_workers": 0,
         "autocast": false,
         "base_data_dir": "dataset/color_code",
         "result_dir": "test_results/server",
