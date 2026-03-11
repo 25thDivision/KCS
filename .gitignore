@@ -15,8 +15,8 @@ dataset/
 *.npz
 *.npy
 
-# 비밀 키 파일 무시
-credentials.json
+# Key 파일 무시
+keys.json
 
 # 로그 파일 무시
 *.log

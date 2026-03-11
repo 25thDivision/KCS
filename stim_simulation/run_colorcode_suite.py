@@ -13,7 +13,10 @@ import requests
 import json
 
 # --- 모듈 경로 설정 ---
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(current_dir)
+sys.path.append(parent_dir)
 
 # --- 커스텀 모듈 임포트 ---
 from simulation.common.dataset import QECDataset
@@ -32,121 +35,19 @@ from models.graph_mamba import GraphMamba
 # ==============================================================================
 
 # 1. 실행할 모델 및 하이퍼파라미터 정의
-MODEL_CONFIGS = {
-    "CNN": {
-        "enabled": False,  # False임! 확인!
-        "type": "image",
-        "use_adj": False,
-        "batch_size": 256,
-        "lr": 1e-3,
-        "loss_weight": "linear", # (1-p)/p
-        "params": {}
-    },
-    "UNet": {
-        "enabled": False,  # False임! 확인!
-        "type": "image",
-        "use_adj": False,
-        "batch_size": 128,
-        "lr": 1e-3,
-        "loss_weight": "linear",
-        "params": {
-            "base_filters": 32
-        }
-    },
-    "GCN": {
-        "enabled": False,
-        "type": "graph",
-        "use_adj": True,
-        "batch_size": 256,
-        "lr": 1e-3,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16,
-            "num_layers": 4
-        }
-    },
-    "GCNII": {
-        "enabled": False,
-        "type": "graph",
-        "use_adj": True,
-        "batch_size": 256,
-        "lr": 1e-3,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16,
-            "num_layers": 16,
-            "alpha": 0.1,
-            "theta": 0.5,
-            "dropout": 0.1
-        }
-    },
-    "GAT": {
-        "enabled": False,
-        "type": "graph",
-        "use_adj": True,
-        "batch_size": 256,
-        "lr": 1e-3,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16, # 헤드가 4개면 총 32*4=128차원
-            "heads": 4,
-            "num_layers": 4,
-            "dropout": 0.1
-        }
-    },
-    "APPNP": {
-        "enabled": False,
-        "type": "graph",
-        "use_adj": True,
-        "batch_size": 256,
-        "lr": 1e-3,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16,
-            "K": 10,       # 전파 횟수
-            "alpha": 0.1   # Teleport 확률
-        }
-    },
-    "GNN": {
-        "enabled": False,  # False임! 확인!
-        "type": "graph",
-        "use_adj": False,
-        "batch_size": 512,
-        "lr": 1e-3,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 64,
-            "num_layers": 4
-        }
-    },
-    "GraphTransformer": {
-        "enabled": False,  # False임! 확인!
-        "type": "graph",
-        "use_adj": False,
-        "batch_size": 256, 
-        "lr": 1e-4,
-        "loss_weight": "sqrt", # sqrt((1-p)/p)
-        "params": {
-            "d_model": 256,
-            "num_heads": 4,
-            "num_layers": 5,
-            "dropout": 0.1
-        }
-    },
-    "GraphMamba": {
-        "enabled": True,
-        "type": "graph",
-        "use_adj": False,
-        "batch_size": 256,
-        "lr": 1e-4,
-        "loss_weight": "sqrt",
-        "params": {
-            "d_model": 64,
-            "num_layers": 4,
-            "dropout": 0.1
-        }
-    }
-}
+def load_model_configs():
+    model_config_file = "config.json"
+    if os.path.exists(model_config_file):
+            try:
+                with open(model_config_file, "r") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"⚠️ Failed to load {model_config_file}: {e}")
+    else:
+        print("⚠️ config.json not found.")
+        sys.exit(1)
+
+MODEL_CONFIGS = load_model_configs()
 
 # 2. 실험 조건
 # DISTANCES = [3, 5, 7]
@@ -173,19 +74,19 @@ MAX_EPOCHS = 20
 PATIENCE = 3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# 5. Discord Webhook 설정
+# 5. 알림용 Discord Webhook 설정
 def load_webhook_url():
-    key_file = "credentials.json"
+    key_file = os.path.join(parent_dir, "keys.json")
     if os.path.exists(key_file):
         try:
             with open(key_file, "r") as f:
                 data = json.load(f)
                 return data.get("discord_webhook_url", "")
         except Exception as e:
-            print(f"⚠️ Failed to load credentials.json: {e}")
+            print(f"⚠️ Failed to load keys.json: {e}")
             return ""
     else:
-        print("⚠️ credentials.json not found. Discord alerts disabled.")
+        print("⚠️ keys.json not found. Discord alerts disabled.")
         return ""
 
 DISCORD_WEBHOOK_URL = load_webhook_url()
@@ -363,7 +264,6 @@ def train_and_evaluate(model, train_loader, test_loader, edge_index, criterion, 
         eye = torch.eye(num_nodes, device=DEVICE)
         adj = adj + eye
         adj = (adj > 0).float() # 혹시 2가 되면 1로 맞춤
-    
     
     if AUTOCAST:
         # AMP Scaler 초기화 (학습 가속용)
