@@ -1,115 +1,129 @@
 {
-    "CNN": {
-        "enabled": false,
-        "type": "image",
-        "use_adj": false,
-        "batch_size": 256,
-        "lr": 0.001,
-        "loss_weight": "linear",
-        "params": {}
+    "experiment": {
+        "distances": [3, 5, 7],
+        "error_rates": [0.005, 0.01, 0.05],
+        "error_types": ["X", "Z"],
+        "max_epochs": 20,
+        "patience": 3,
+        "num_workers": 0,
+        "autocast": false,
+        "base_data_dir": "dataset/color_code",
+        "result_dir": "test_results/server",
+        "weight_dir": "saved_weights/server"
     },
-    "UNet": {
-        "enabled": false,
-        "type": "image",
-        "use_adj": false,
-        "batch_size": 128,
-        "lr": 0.001,
-        "loss_weight": "linear",
-        "params": {
-            "base_filters": 32
-        }
-    },
-    "GCN": {
-        "enabled": false,
-        "type": "graph",
-        "use_adj": true,
-        "batch_size": 256,
-        "lr": 0.001,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16,
-            "num_layers": 4
-        }
-    },
-    "GCNII": {
-        "enabled": false,
-        "type": "graph",
-        "use_adj": true,
-        "batch_size": 256,
-        "lr": 0.001,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16,
-            "num_layers": 16,
-            "alpha": 0.1,
-            "theta": 0.5,
-            "dropout": 0.1
-        }
-    },
-    "GAT": {
-        "enabled": false,
-        "type": "graph",
-        "use_adj": true,
-        "batch_size": 256,
-        "lr": 0.001,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16,
-            "heads": 4,
-            "num_layers": 4,
-            "dropout": 0.1
-        }
-    },
-    "APPNP": {
-        "enabled": false,
-        "type": "graph",
-        "use_adj": true,
-        "batch_size": 256,
-        "lr": 0.001,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 16,
-            "K": 10,
-            "alpha": 0.1
-        }
-    },
-    "GNN": {
-        "enabled": false,
-        "type": "graph",
-        "use_adj": false,
-        "batch_size": 512,
-        "lr": 0.001,
-        "loss_weight": "linear",
-        "params": {
-            "hidden_dim": 64,
-            "num_layers": 4
-        }
-    },
-    "GraphTransformer": {
-        "enabled": false,
-        "type": "graph",
-        "use_adj": false,
-        "batch_size": 256,
-        "lr": 0.0001,
-        "loss_weight": "sqrt",
-        "params": {
-            "d_model": 256,
-            "num_heads": 4,
-            "num_layers": 5,
-            "dropout": 0.1
-        }
-    },
-    "GraphMamba": {
-        "enabled": true,
-        "type": "graph",
-        "use_adj": false,
-        "batch_size": 256,
-        "lr": 0.0001,
-        "loss_weight": "sqrt",
-        "params": {
-            "d_model": 64,
-            "num_layers": 4,
-            "dropout": 0.1
+    "models": {
+        "CNN": {
+            "enabled": false,
+            "type": "image",
+            "use_adj": false,
+            "batch_size": 256,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "params": {}
+        },
+        "UNet": {
+            "enabled": false,
+            "type": "image",
+            "use_adj": false,
+            "batch_size": 128,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "params": {
+                "base_filters": 32
+            }
+        },
+        "GCN": {
+            "enabled": false,
+            "type": "graph",
+            "use_adj": true,
+            "batch_size": 256,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "params": {
+                "hidden_dim": 16,
+                "num_layers": 4
+            }
+        },
+        "GCNII": {
+            "enabled": false,
+            "type": "graph",
+            "use_adj": true,
+            "batch_size": 256,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "params": {
+                "hidden_dim": 16,
+                "num_layers": 16,
+                "alpha": 0.1,
+                "theta": 0.5,
+                "dropout": 0.1
+            }
+        },
+        "GAT": {
+            "enabled": false,
+            "type": "graph",
+            "use_adj": true,
+            "batch_size": 256,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "params": {
+                "hidden_dim": 16,
+                "heads": 4,
+                "num_layers": 4,
+                "dropout": 0.1
+            }
+        },
+        "APPNP": {
+            "enabled": false,
+            "type": "graph",
+            "use_adj": true,
+            "batch_size": 256,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "params": {
+                "hidden_dim": 16,
+                "K": 10,
+                "alpha": 0.1
+            }
+        },
+        "GNN": {
+            "enabled": false,
+            "type": "graph",
+            "use_adj": false,
+            "batch_size": 512,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "params": {
+                "hidden_dim": 64,
+                "num_layers": 4
+            }
+        },
+        "GraphTransformer": {
+            "enabled": false,
+            "type": "graph",
+            "use_adj": false,
+            "batch_size": 256,
+            "lr": 0.0001,
+            "loss_weight": "sqrt",
+            "params": {
+                "d_model": 256,
+                "num_heads": 4,
+                "num_layers": 5,
+                "dropout": 0.1
+            }
+        },
+        "GraphMamba": {
+            "enabled": true,
+            "type": "graph",
+            "use_adj": false,
+            "batch_size": 256,
+            "lr": 0.0001,
+            "loss_weight": "sqrt",
+            "params": {
+                "d_model": 64,
+                "num_layers": 4,
+                "dropout": 0.1
+            }
         }
     }
 }

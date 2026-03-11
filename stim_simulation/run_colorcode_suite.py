@@ -34,47 +34,44 @@ from models.graph_mamba import GraphMamba
 # ⚙️ [User Config] 하이퍼파라미터 & 설정 관리
 # ==============================================================================
 
-# 1. 실행할 모델 및 하이퍼파라미터 정의
-def load_model_configs():
-    model_config_file = "config.json"
-    if os.path.exists(model_config_file):
-            try:
-                with open(model_config_file, "r") as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"⚠️ Failed to load {model_config_file}: {e}")
-    else:
-        print("⚠️ config.json not found.")
+# 1. 실행할 모델 및 하이퍼파라미터 설정
+def load_config():
+    config_path = os.path.join(current_dir, "config.json")
+    if not os.path.exists(config_path):
+        print(f"⚠️ config.json not found at {config_path}")
+        sys.exit(1)
+    try:
+        with open(config_path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"⚠️ Failed to load config.json: {e}")
         sys.exit(1)
 
-MODEL_CONFIGS = load_model_configs()
+CONFIG = load_config()
+MODEL_CONFIGS = CONFIG["models"]
 
-# 2. 실험 조건
-# DISTANCES = [3, 5, 7]
-DISTANCES = [7]
-# ERROR_RATES = [0.005, 0.01, 0.05]
-ERROR_RATES = [0.05]
-# ERROR_TYPES = ["X", "Z"]
-ERROR_TYPES = ["X"]
+# 2. 실험 조건 설정
+EXP = CONFIG["experiment"]
+DISTANCES = EXP["distances"]
+ERROR_RATES = EXP["error_rates"]
+ERROR_TYPES = EXP["error_types"]
+MAX_EPOCHS = EXP["max_epochs"]
+PATIENCE = EXP["patience"]
+AUTOCAST = EXP["autocast"]
 
-# 2-1. 실험 환경
+# 2-1. 실험 환경 설정
 # NUM_WORKERS = min(8, os.cpu_count() - 2) if os.cpu_count() else 0
 NUM_WORKERS = 0
-AUTOCAST = False
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # 3. 경로 설정
-BASE_DATA_DIR = "dataset/color_code"
-RESULT_DIR = "test_results/server"
-WEIGHT_DIR = "saved_weights/server"
+BASE_DATA_DIR = os.path.join(current_dir, EXP["base_data_dir"])
+RESULT_DIR = os.path.join(current_dir, EXP["result_dir"])
+WEIGHT_DIR = os.path.join(current_dir, EXP["weight_dir"])
 os.makedirs(RESULT_DIR, exist_ok=True)
 os.makedirs(WEIGHT_DIR, exist_ok=True)
 
-# 4. 공통 학습 설정
-MAX_EPOCHS = 20
-PATIENCE = 3
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-# 5. 알림용 Discord Webhook 설정
+# 4. 알림용 Discord Webhook 설정
 def load_webhook_url():
     key_file = os.path.join(parent_dir, "keys.json")
     if os.path.exists(key_file):
