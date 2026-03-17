@@ -1,0 +1,33 @@
+{
+    "backend": {
+        "type": "simulator",
+        "noise_model": "forte-1",
+        "shots": 1000
+    },
+    "color_code": {
+        "distances": [3],
+        "num_rounds_per_distance": {
+            "3": 3,
+            "5": 5,
+            "7": 7
+        },
+        "logical_initial_state": 0
+    },
+    "evaluation": {
+        "top_models": ["GraphMamba", "GraphTransformer"],
+        "model_type_map": {
+            "CNN": "image",
+            "UNet": "image",
+            "GCN": "graph",
+            "GCNII": "graph",
+            "GAT": "graph",
+            "APPNP": "graph",
+            "GNN": "graph",
+            "GraphTransformer": "graph",
+            "GraphMamba": "graph"
+        },
+        "stim_weight_dir": "../stim_simulation/saved_weights/server",
+        "stim_error_rates": [0.005, 0.01, 0.05],
+        "stim_error_types": ["X"]
+    }
+}
