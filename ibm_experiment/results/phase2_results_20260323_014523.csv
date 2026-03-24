@@ -1,0 +1,7 @@
+Model,Distance,Num_Rounds,Backend,Shots,Stim_Error_Rate,Stim_Error_Type,Logical_Error_Rate,Total_Shots,Logical_Errors,Timestamp
+CNN,3,3,ibm_yonsei,1000,0.005,X,1.000000,1000,1000,20260323_014523
+CNN,3,3,ibm_yonsei,1000,0.01,X,0.000000,1000,0,20260323_014523
+CNN,3,3,ibm_yonsei,1000,0.05,X,0.000000,1000,0,20260323_014523
+GNN,3,3,ibm_yonsei,1000,0.005,X,0.000000,1000,0,20260323_014523
+GNN,3,3,ibm_yonsei,1000,0.01,X,0.000000,1000,0,20260323_014523
+GNN,3,3,ibm_yonsei,1000,0.05,X,0.000000,1000,0,20260323_014523

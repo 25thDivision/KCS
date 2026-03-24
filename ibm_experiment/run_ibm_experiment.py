@@ -1,9 +1,9 @@
 """
-Phase 2: IonQ 노이즈 모델 시뮬레이션 파이프라인
+Phase 2: IBM Eagle Surface Code 실험 파이프라인
 
 사용법:
-  python3 ionq_experiment/run_ionq_experiment.py
-  python3 ionq_experiment/run_ionq_experiment.py -m GraphMamba GraphTransformer
+  python3 ibm_experiment/run_ibm_experiment.py
+  python3 ibm_experiment/run_ibm_experiment.py -m GraphMamba GraphTransformer
 """
 
 import os
@@ -20,8 +20,8 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(current_dir)
 sys.path.append(root_dir)
 
-from circuits.qiskit_colorcode_generator import ColorCodeCircuit
-from simulators.ionq_simulator import IonQSimulator
+from circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
+from simulators.ibm_simulator import IBMSimulator
 from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
 from decoders.ml_decoder_adapter import MLDecoderAdapter
@@ -29,7 +29,7 @@ from evaluation.logical_error_rate import LogicalErrorRateEvaluator
 from paths import ProjectPaths
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="IonQ Phase 2 Experiment")
+    parser = argparse.ArgumentParser(description="IBM Phase 2 Experiment")
     parser.add_argument("-m", "--models", nargs="+", type=str, default=None,
                         help="실행할 모델 (미지정 시 config의 top_models)")
     return parser.parse_args()
@@ -44,29 +44,29 @@ def load_config():
 
 CONFIG = load_config()
 KEYS = PATHS.load_keys()
-DISCORD_WEBHOOK_URL = KEYS.get("discord_ionq", "")
+DISCORD_WEBHOOK_URL = KEYS.get("discord_ibm", "")
 
-def send_discord_alert(model_name, d, p, err_type, ler, total_shots, noise_model):
+def send_discord_alert(model_name, d, p, err_type, ler, total_shots, backend_name):
     if not DISCORD_WEBHOOK_URL:
         return
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={
-            "content": f"🔬 **[IonQ Phase 2] {model_name} Evaluated!**",
-            "embeds": [{"title": f"d={d}, p={p}, {err_type} | {noise_model}", "color": 3447003,
+            "content": f"🔬 **[IBM Phase 2] {model_name} Evaluated!**",
+            "embeds": [{"title": f"d={d}, p={p}, {err_type} | {backend_name}", "color": 3447003,
                 "fields": [
                     {"name": "LER", "value": f"{ler:.4f}", "inline": True},
                     {"name": "Total Shots", "value": str(total_shots), "inline": True},
                     {"name": "Model", "value": model_name, "inline": True},
-                ], "footer": {"text": "STL Lab Server | IonQ Phase 2"}}]
+                ], "footer": {"text": "STL Lab Server | IBM Phase 2"}}]
         }, timeout=5)
     except:
         pass
 
 def save_results(results: list):
-    output_dir = PATHS.experiment_result_dir("ionq")
+    output_dir = PATHS.experiment_result_dir("ibm")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(output_dir, f"phase2_results_{timestamp}.csv")
-    headers = ["Model", "Distance", "Num_Rounds", "Noise_Model", "Shots",
+    headers = ["Model", "Distance", "Num_Rounds", "Backend", "Shots",
                "Stim_Error_Rate", "Stim_Error_Type",
                "Logical_Error_Rate", "Total_Shots", "Logical_Errors", "Timestamp"]
     with open(filepath, "w", newline="") as f:
@@ -74,19 +74,18 @@ def save_results(results: list):
         writer.writerow(headers)
         for r in results:
             writer.writerow([r["model_name"], r["distance"], r["num_rounds"],
-                r["noise_model"], r["shots"], r["stim_error_rate"], r["stim_error_type"],
+                r["backend"], r["shots"], r["stim_error_rate"], r["stim_error_type"],
                 f"{r['logical_error_rate']:.6f}", r["total_shots"], r["logical_errors"], timestamp])
     print(f"\n>>> Results saved to: {filepath}")
 
 def run_pipeline(config: dict):
     backend_cfg = config["backend"]
-    code_cfg = config["color_code"]
+    code_cfg = config["surface_code"]
     eval_cfg = config["evaluation"]
 
     code_type = eval_cfg["code_type"]
     noise = eval_cfg["noise"]
 
-    # CLI 모델 우선, 없으면 config
     top_models = ARGS.models if ARGS.models else eval_cfg["top_models"]
 
     results = []
@@ -95,25 +94,25 @@ def run_pipeline(config: dict):
         num_rounds = code_cfg["num_rounds_per_distance"][str(distance)]
 
         print(f"\n{'='*70}")
-        print(f"  Phase 2: d={distance}, rounds={num_rounds}, noise={backend_cfg['noise_model']}")
+        print(f"  Phase 2: d={distance}, rounds={num_rounds}, backend={backend_cfg['backend_name']}")
         print(f"  Models: {top_models}")
         print(f"{'='*70}")
 
-        print(f"\n>>> [Step 1] Building Color Code Circuit...")
-        cc = ColorCodeCircuit(distance=distance, num_rounds=num_rounds)
-        print(cc.get_circuit_summary())
-        qc = cc.build_circuit(initial_state=code_cfg["logical_initial_state"])
+        print(f"\n>>> [Step 1] Building Surface Code Circuit...")
+        sc = SurfaceCodeCircuit(distance=distance, num_rounds=num_rounds)
+        print(sc.get_circuit_summary())
+        qc = sc.build_circuit(initial_state=code_cfg["logical_initial_state"])
         print(f"    Qiskit Circuit: {qc.num_qubits} qubits, depth={qc.depth()}")
 
-        print(f"\n>>> [Step 2] Running on IonQ Simulator...")
-        runner = IonQSimulator(
+        print(f"\n>>> [Step 2] Running on IBM backend...")
+        runner = IBMSimulator(
             backend_type=backend_cfg["type"],
-            noise_model=backend_cfg["noise_model"]
+            backend_name=backend_cfg["backend_name"]
         )
         counts = runner.run(qc, shots=backend_cfg["shots"])
 
         print(f"\n>>> [Step 3] Extracting syndromes and data states...")
-        syn_indices = cc.get_syndrome_indices()
+        syn_indices = sc.get_syndrome_indices()
         extractor = SyndromeExtractor(syn_indices)
         syndromes, data_states, shot_counts = extractor.extract_from_counts(counts)
 
@@ -124,9 +123,12 @@ def run_pipeline(config: dict):
             edge_dir=edge_dir
         )
 
+        stim_data_indices = converter.get_data_qubit_indices()
+
         evaluator = LogicalErrorRateEvaluator(
             logical_z=syn_indices["logical_z"],
-            initial_logical_state=code_cfg["logical_initial_state"]
+            initial_logical_state=code_cfg["logical_initial_state"],
+            stim_data_indices=stim_data_indices,
         )
 
         for model_name in top_models:
@@ -179,11 +181,11 @@ def run_pipeline(config: dict):
                           f"({eval_result['logical_errors']}/{eval_result['total_shots']})")
 
                     send_discord_alert(model_name, distance, p, err_type,
-                                       ler, eval_result["total_shots"], backend_cfg["noise_model"])
+                                       ler, eval_result["total_shots"], backend_cfg["backend_name"])
 
                     results.append({
                         "model_name": model_name, "distance": distance,
-                        "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
+                        "num_rounds": num_rounds, "backend": backend_cfg["backend_name"],
                         "shots": backend_cfg["shots"], "stim_error_rate": p,
                         "stim_error_type": err_type, "logical_error_rate": ler,
                         "total_shots": eval_result["total_shots"],
@@ -194,7 +196,7 @@ def run_pipeline(config: dict):
 
 def main():
     print("=" * 70)
-    print("  Phase 2: IonQ Noise Model Simulation")
+    print("  Phase 2: IBM Surface Code Experiment")
     print("=" * 70)
 
     results = run_pipeline(CONFIG)

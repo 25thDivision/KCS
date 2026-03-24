@@ -1,5 +1,5 @@
 """
-Phase 2 Baseline 비교 스크립트
+Phase 2 Baseline 비교 스크립트 (IBM Surface Code)
 """
 
 import os
@@ -12,14 +12,13 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(current_dir)
 sys.path.append(root_dir)
 
-from circuits.qiskit_colorcode_generator import ColorCodeCircuit
-from simulators.ionq_simulator import IonQSimulator
+from circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
+from simulators.ibm_simulator import IBMSimulator
 from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
 from decoders.ml_decoder_adapter import MLDecoderAdapter
 from decoders.baseline_decoders import (
-    NoCorrection, LookupTableDecoder,
-    run_baseline_comparison, print_comparison
+    NoCorrection, run_baseline_comparison, print_comparison
 )
 from evaluation.logical_error_rate import LogicalErrorRateEvaluator
 from paths import ProjectPaths
@@ -33,12 +32,12 @@ def load_config():
 
 def main():
     print("=" * 60)
-    print("  Phase 2: Baseline Comparison")
+    print("  Phase 2: IBM Baseline Comparison")
     print("=" * 60)
 
     config = load_config()
     backend_cfg = config["backend"]
-    code_cfg = config["color_code"]
+    code_cfg = config["surface_code"]
     eval_cfg = config["evaluation"]
 
     code_type = eval_cfg["code_type"]
@@ -47,22 +46,21 @@ def main():
     for distance in code_cfg["distances"]:
         num_rounds = code_cfg["num_rounds_per_distance"][str(distance)]
 
-        print(f"\n>>> d={distance}, rounds={num_rounds}, noise={backend_cfg['noise_model']}")
+        print(f"\n>>> d={distance}, rounds={num_rounds}, backend={backend_cfg['backend_name']}")
 
-        cc = ColorCodeCircuit(distance=distance, num_rounds=num_rounds)
-        qc = cc.build_circuit(initial_state=code_cfg["logical_initial_state"])
+        sc = SurfaceCodeCircuit(distance=distance, num_rounds=num_rounds)
+        qc = sc.build_circuit(initial_state=code_cfg["logical_initial_state"])
 
-        print(f"\n>>> Running IonQ simulator (shots={backend_cfg['shots']})...")
-        runner = IonQSimulator(
+        print(f"\n>>> Running IBM backend (shots={backend_cfg['shots']})...")
+        runner = IBMSimulator(
             backend_type=backend_cfg["type"],
-            noise_model=backend_cfg["noise_model"]
+            backend_name=backend_cfg["backend_name"]
         )
         counts = runner.run(qc, shots=backend_cfg["shots"])
 
-        syn_indices = cc.get_syndrome_indices()
+        syn_indices = sc.get_syndrome_indices()
         extractor = SyndromeExtractor(syn_indices)
         syndromes, data_states, shot_counts = extractor.extract_from_counts(counts)
-        print(f"    Shots: {shot_counts.sum()}, Unique outcomes: {len(syndromes)}")
 
         edge_dir = PATHS.stim_data_dir(code_type, noise, "graph")
         converter = StimFormatConverter(

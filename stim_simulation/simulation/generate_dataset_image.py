@@ -1,199 +1,205 @@
+"""
+Image 데이터셋 생성
+
+사용법:
+  python3 generate_dataset_image.py
+  python3 generate_dataset_image.py -c color_code -d 3 -e X
+  python3 generate_dataset_image.py -c surface_code -n realistic/dp0_mf0.005_rf0.005_gd0.004 -d 3
+"""
+
 import os
 import sys
 import json
 import time
+import argparse
 import numpy as np
-import requests  # Discord 웹훅 통신용 추가
 from tqdm import tqdm
 from joblib import Parallel, delayed
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(CURRENT_DIR)
-ROOT_DIR = os.path.dirname(PARENT_DIR)  # keys.json 경로 탐색용 추가
+ROOT_DIR = os.path.dirname(PARENT_DIR)
 sys.path.append(CURRENT_DIR)
+sys.path.append(ROOT_DIR)
 
-from generators.color_code import create_color_code_circuit, generate_dataset
 from common.mapper_image import SyndromeImageMapper
+from paths import ProjectPaths
 
-# ==============================================================================
-# Discord Alert 내장 기능
-# ==============================================================================
-def _load_webhook_url() -> str:
-    key_file = os.path.join(ROOT_DIR, "keys.json")
-    if os.path.exists(key_file):
-        try:
-            with open(key_file, "r") as f:
-                return json.load(f).get("discord_webhook_url", "")
-        except:
-            pass
-    return ""
+def parse_args():
+    parser = argparse.ArgumentParser(description="Image Dataset Generator")
+    parser.add_argument("-c", "--code", nargs="+", type=str, default=None)
+    parser.add_argument("-n", "--noise", nargs="+", type=str, default=None)
+    parser.add_argument("-d", "--distance", nargs="+", type=int, default=None)
+    parser.add_argument("-e", "--error_type", nargs="+", type=str, default=None)
+    parser.add_argument("--cpu", nargs="?", type=str, default=None, const=None, help="num_workers 조정 (generate 단계)")
+    return parser.parse_args()
 
-WEBHOOK_URL = _load_webhook_url()
+ARGS = parse_args()
+PATHS = ProjectPaths(ROOT_DIR)
 
-def send_dataset_alert(data_type: str, code_type: str, measurement: str,
-                       distance: int, p: float, err_type: str, status: str, detail: str = ""):
-    if not WEBHOOK_URL: return
-    
-    emoji_map = {"start": "🚀", "done": "✅", "error": "❌"}
-    emoji = emoji_map.get(status, "📊")
-    
-    dtype_str = data_type.capitalize()
-    meas_str = measurement.capitalize()
-    
-    content = f"{emoji} [{dtype_str}] [{meas_str}] d={distance}, p={p}, {err_type}  → {status}"
-    
-    # 에러면 아랫줄에, 정상이면 괄호 안에 부가 정보 추가
-    if detail:
-        if status == "error":
-            content += f"\n> **Error Detail**: {detail}"
-        else:
-            content += f" ({detail})"
-            
-    try:
-        requests.post(WEBHOOK_URL, json={"content": content}, timeout=5)
-    except:
-        pass
-
-def send_completion_alert(data_type: str, total_files: int, elapsed_min: float = None):
-    if not WEBHOOK_URL: return
-    try:
-        dtype_str = data_type.capitalize()
-        desc = f"Total files: {total_files}"
-        if elapsed_min:
-            desc += f" | Elapsed: {elapsed_min:.1f} min"
-            
-        message = {"content": f"🎉 **[{dtype_str}] All Datasets Generated!** {desc}"}
-        requests.post(WEBHOOK_URL, json=message, timeout=5)
-    except:
-        pass
-
-# ==============================================================================
-# config.json 로드
-# ==============================================================================
-def load_config():
-    config_path = os.path.join(PARENT_DIR, "config.json")
-    if not os.path.exists(config_path):
-        print(f"⚠️ config.json not found at {config_path}")
-        sys.exit(1)
-    with open(config_path, "r") as f:
-        return json.load(f)
-
-CONFIG = load_config()
+CONFIG = PATHS.load_stim_config()
 EXP = CONFIG["experiment"]
-
-DISTANCES = EXP["distances"]
+NOISE_PROFILES = EXP["noise_profiles"]
 NOISE_RATES = EXP["error_rates"]
-ERROR_TYPES = EXP["error_types"]
-CODE_TYPES = EXP["code_types"]
-MEASUREMENTS = EXP["measurements"]
-MEAS_NOISE_MAP = EXP["meas_noise"]
 
-TRAIN_SAMPLES = {
-    3: 10000000,
-    5: 1000000,
-    7: 1000000
-}
-TEST_SAMPLES = {
-    3: 100000,
-    5: 100000,
-    7: 100000
-}
+CODE_TYPES = ARGS.code if ARGS.code else EXP["code_types"]
+ACTIVE_NOISE = ARGS.noise if ARGS.noise else EXP["active_noise"]
+DISTANCES = ARGS.distance if ARGS.distance else EXP["distances"]
+ERROR_TYPES = ARGS.error_type if ARGS.error_type else EXP["error_types"]
 
+TRAIN_SAMPLES = {3: 10000000, 5: 1000000, 7: 1000000}
+TEST_SAMPLES = {3: 100000, 5: 100000, 7: 100000}
 CHUNK_SIZE = 5000
-NUM_WORKERS = max(1, (os.cpu_count() // 2) - 1)
 
-DATASET_BASE = os.path.join(PARENT_DIR, EXP["dataset_dir"])
+if ARGS.cpu == "full":
+    NUM_WORKERS = max(1, (os.cpu_count() - 8))
+else:
+    NUM_WORKERS = max(1, (os.cpu_count() // 2) - 1)
 
-# ==============================================================================
-# 병렬 처리 함수
-# ==============================================================================
-def _generate_chunk(d, p, err_type, count, meas_noise):
-    raw, phys = generate_dataset(d, d, p, count, error_type=err_type, meas_noise=meas_noise)
-    return raw, phys
+def get_generator(code_type):
+    if code_type == "color_code":
+        from generators.color_code import create_color_code_circuit, generate_dataset
+        return create_color_code_circuit, generate_dataset
+    elif code_type == "surface_code":
+        from generators.surface_code import create_surface_code_circuit, generate_dataset
+        return create_surface_code_circuit, generate_dataset
+    else:
+        raise ValueError(f"Unknown code_type: {code_type}")
 
-def generate_and_save(mapper, output_dir, d, p, err_type, total_samples, file_prefix, meas_noise):
+KEYS = PATHS.load_keys()
+DISCORD_WEBHOOK_URL = KEYS.get("discord_generation", "")
+
+def send_discord_alert(code_type, noise, d, p, err_type, status, detail=""):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    import requests
+    
+    color_map = {"start": 3447003, "done": 5763719, "error": 15548997}
+    emoji_map = {"start": "🚀", "done": "✅", "error": "❌"}
+    
+    # 1. '/'를 기준으로 분리하고 앞글자 대문자로 변환 (예외 처리 포함)
+    try:
+        noise_type, noise_params = noise.split('/')
+        noise_type = noise_type.capitalize() 
+    except ValueError:
+        noise_type = noise.capitalize()
+        noise_params = "N/A"
+        
+    status_emoji = emoji_map.get(status, '📊')
+    status_color = color_map.get(status, 3447003)
+    
+    # 2. Embed 구성 (Title은 심플하게, 복잡한 설정은 Description으로)
+    embed = {
+        "title": f"{status_emoji} Dataset Generation: {status.upper()}",
+        "description": f"**Code**: `{code_type}`\n**Noise**: `{noise_type}` (`{noise_params}`)",
+        "color": status_color,
+        "fields": [
+            # 3. 주요 지표 3개를 한 줄에 나란히 배치
+            {"name": "📏 Distance (d)", "value": str(d), "inline": True},
+            {"name": "📉 Error Rate (p)", "value": str(p), "inline": True},
+            {"name": "💥 Error Type", "value": err_type, "inline": True},
+        ],
+        "footer": {"text": f"STL Server | Status: {status.title()}"}
+    }
+    
+    # Detail이 있을 경우 아래에 새 줄로 추가 (inline=False)
+    if detail:
+        embed["fields"].append({"name": "📝 Detail", "value": detail, "inline": False})
+        
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]}, timeout=5)
+    except:
+        pass
+
+def send_completion_alert(total_files, elapsed_min=None):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    import requests
+    
+    time_str = f"{elapsed_min:.1f} min" if elapsed_min else "Unknown"
+    
+    embed = {
+        "title": "🎉 All Datasets Generated Successfully!",
+        "color": 15258703, # 눈에 띄는 황금색/노란색
+        "fields": [
+            {"name": "📁 Total Files", "value": f"**{total_files}** files", "inline": True},
+            {"name": "⏱️ Elapsed Time", "value": f"**{time_str}**", "inline": True}
+        ],
+        "footer": {"text": "STL Server | Generation Complete"}
+    }
+    
+    try:
+        # content로 멘션을 주거나 텍스트를 남기고, embeds에 카드를 추가
+        requests.post(DISCORD_WEBHOOK_URL, json={
+            "content": "✨ **데이터셋 생성이 모두 완료되었습니다!**",
+            "embeds": [embed]
+        }, timeout=5)
+    except:
+        pass
+
+def _generate_chunk(code_type, d, p, err_type, count, np_):
+    _, generate_dataset = get_generator(code_type)
+    return generate_dataset(d, d, p, count, error_type=err_type,
+                            meas_noise=np_["meas_flip"], reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
+
+def generate_and_save(mapper, output_dir, code_type, d, p, err_type, total_samples, file_prefix, np_):
     num_chunks = int(np.ceil(total_samples / CHUNK_SIZE))
-    desc = f"       [{file_prefix.upper()}] ({err_type}, p={p})"
-    print(f"{desc} -> Generating with {NUM_WORKERS} workers (meas_noise={meas_noise})...")
-
+    print(f"       [{file_prefix.upper()}] ({err_type}, p={p}) -> {NUM_WORKERS} workers...")
     results = Parallel(n_jobs=NUM_WORKERS)(
-        delayed(_generate_chunk)(
-            d, p, err_type,
-            min(CHUNK_SIZE, total_samples - i * CHUNK_SIZE),
-            meas_noise
-        )
-        for i in tqdm(range(num_chunks), desc="       Processing Chunks")
-    )
+        delayed(_generate_chunk)(code_type, d, p, err_type, min(CHUNK_SIZE, total_samples - i * CHUNK_SIZE), np_)
+        for i in tqdm(range(num_chunks), desc="       Processing Chunks"))
 
     print("       -> Mapping to Images & Merging...")
-
-    all_images = []
-    all_labels = []
-
-    for raw_detectors, physical_errors in results:
-        images = mapper.map_to_images(raw_detectors)
-        all_images.append(images)
-        all_labels.append(physical_errors)
+    all_images, all_labels = [], []
+    for raw, phys in results:
+        all_images.append(mapper.map_to_images(raw))
+        all_labels.append(phys)
 
     full_images = np.concatenate(all_images, axis=0)
     full_labels = np.concatenate(all_labels, axis=0)
-
     file_name = f"{file_prefix}_d{d}_p{p}_{err_type}.npz"
-    file_path = os.path.join(output_dir, file_name)
-
-    np.savez_compressed(file_path, features=full_images, labels=full_labels)
+    np.savez_compressed(os.path.join(output_dir, file_name), features=full_images, labels=full_labels)
     print(f"       Saved: {file_name} (Shape: {full_images.shape})")
 
-# ==============================================================================
-# 메인
-# ==============================================================================
 def main():
     start_time = time.time()
     file_count = 0
-
-    print(f"=== Generating Image Datasets (Parallel Mode: {NUM_WORKERS}) ===")
-    print(f"Code Types: {CODE_TYPES}")
-    print(f"Measurements: {MEASUREMENTS}")
-    print(f"Distances: {DISTANCES}, Error Rates: {NOISE_RATES}, Error Types: {ERROR_TYPES}")
+    print(f"=== Generating Image Datasets ===")
+    print(f"Code: {CODE_TYPES}, Noise: {ACTIVE_NOISE}, Dist: {DISTANCES}, Err: {ERROR_TYPES}")
 
     for code_type in CODE_TYPES:
-        for measurement in MEASUREMENTS:
-            meas_noise = MEAS_NOISE_MAP[measurement]
-            output_dir = os.path.join(DATASET_BASE, code_type, measurement, "image")
-            os.makedirs(output_dir, exist_ok=True)
-
-            print(f"\n{'#'*60}")
-            print(f"# {code_type}/{measurement} (meas_noise={meas_noise})")
-            print(f"# Output: {output_dir}")
-            print(f"{'#'*60}")
+        create_circuit, _ = get_generator(code_type)
+        for noise in ACTIVE_NOISE:
+            if noise not in NOISE_PROFILES:
+                print(f"⚠️ Noise '{noise}' not in config. Skipping.")
+                continue
+            np_ = NOISE_PROFILES[noise]
+            output_dir = PATHS.stim_data_dir(code_type, noise, "image")
+            print(f"\n{'#'*60}\n# {code_type}/{noise}\n# Params: {np_}\n{'#'*60}")
 
             for d in DISTANCES:
-                train_count = TRAIN_SAMPLES[d]
-                test_count = TEST_SAMPLES[d]
-                print(f"\n>>> Distance d={d} (Train: {train_count}, Test: {test_count})")
-
-                circuit = create_color_code_circuit(d, d, 0.001, meas_noise=meas_noise)
+                train_count, test_count = TRAIN_SAMPLES[d], TEST_SAMPLES[d]
+                print(f"\n>>> d={d} (Train: {train_count}, Test: {test_count})")
+                circuit = create_circuit(d, d, 0.001, meas_noise=np_["meas_flip"],
+                                         reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
                 mapper = SyndromeImageMapper(circuit)
 
                 for p in NOISE_RATES:
                     for err_type in ERROR_TYPES:
-                        print(f"    -> Processing {err_type}-Error (p={p})...")
-                        send_dataset_alert("image", code_type, measurement, d, p, err_type, "start",
+                        send_discord_alert(code_type, noise, d, p, err_type, "start",
                                            f"Train: {train_count}, Test: {test_count}")
-
                         try:
-                            generate_and_save(mapper, output_dir, d, p, err_type, train_count, "train", meas_noise)
-                            generate_and_save(mapper, output_dir, d, p, err_type, test_count, "test", meas_noise)
+                            generate_and_save(mapper, output_dir, code_type, d, p, err_type, train_count, "train", np_)
+                            generate_and_save(mapper, output_dir, code_type, d, p, err_type, test_count, "test", np_)
                             file_count += 2
-                            send_dataset_alert("image", code_type, measurement, d, p, err_type, "done",
-                                               f"Train: {train_count}, Test: {test_count}")
+                            send_discord_alert(code_type, noise, d, p, err_type, "done")
                         except Exception as e:
                             print(f"    ❌ Error: {e}")
-                            send_dataset_alert("image", code_type, measurement, d, p, err_type, "error", str(e))
+                            send_discord_alert(code_type, noise, d, p, err_type, "error", str(e))
 
     elapsed = (time.time() - start_time) / 60
-    send_completion_alert("image", file_count, elapsed)
-    print(f"\n=== All Image Datasets Generated! ({file_count} files, {elapsed:.1f} min) ===")
+    send_completion_alert(file_count, elapsed)
+    print(f"\n=== Done! ({file_count} files, {elapsed:.1f} min) ===")
 
 if __name__ == "__main__":
     main()

@@ -3,12 +3,12 @@ import numpy as np
 from typing import Tuple, List
 
 
-def create_color_code_circuit(distance: int, rounds: int, noise: float,
-                               meas_noise: float = 0.0,
-                               reset_noise: float = 0.0,
-                               gate_noise: float = 0.0) -> stim.Circuit:
+def create_surface_code_circuit(distance: int, rounds: int, noise: float,
+                                 meas_noise: float = 0.0,
+                                 reset_noise: float = 0.0,
+                                 gate_noise: float = 0.0) -> stim.Circuit:
     return stim.Circuit.generated(
-        "color_code:memory_xyz",
+        "surface_code:rotated_memory_x",
         distance=distance,
         rounds=rounds,
         before_round_data_depolarization=noise,
@@ -39,22 +39,22 @@ def generate_dataset(
     meas_noise: float = 0.0, reset_noise: float = 0.0, gate_noise: float = 0.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Color Code용 (신드롬, 물리적 에러) 데이터셋을 생성합니다.
+    Surface Code용 (신드롬, 물리적 에러) 데이터셋을 생성합니다.
 
     에러는 data qubit에만 주입되며, label도 data qubit만 포함합니다.
-    (d=3: 7 data qubits → label 7차원)
+    (d=3: 9 data qubits → label 9차원)
     """
     # data qubit 인덱스 추출용 참조 회로 (dp > 0 필요)
-    ref_circuit = create_color_code_circuit(distance, rounds, 0.001,
-                                            meas_noise=0,
-                                            reset_noise=0,
-                                            gate_noise=0)
+    ref_circuit = create_surface_code_circuit(distance, rounds, 0.001,
+                                           meas_noise=0,
+                                           reset_noise=0,
+                                           gate_noise=0)
     data_indices = _extract_data_qubit_indices(ref_circuit)
     num_data = len(data_indices)
 
     # 실제 시뮬레이션용 회로 (dp=0, 에러는 수동 주입)
     clean_circuit = stim.Circuit.generated(
-        "color_code:memory_xyz",
+        "surface_code:rotated_memory_x",
         distance=distance, rounds=rounds,
         before_round_data_depolarization=0,
         before_measure_flip_probability=meas_noise,

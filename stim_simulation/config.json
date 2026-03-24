@@ -2,16 +2,32 @@
     "experiment": {
         "distances": [3, 5, 7],
         "error_rates": [0.005, 0.01, 0.05],
-        "error_types": ["X", "Z"],
-        "code_types": ["color_code"],
-        "measurements": ["realistic"],
-        "meas_noise": {
-            "ideal": 0.0,
-            "realistic": 0.005
+        "error_types": ["X"],
+        "code_types": ["color_code", "surface_code"],
+        "noise_profiles": {
+            "ideal/dp0_mf0_rf0_gd0": {
+                "data_depol": 0.0,
+                "meas_flip": 0.0,
+                "reset_flip": 0.0,
+                "gate_depol": 0.0
+            },
+            "realistic/dp0_mf0.005_rf0.005_gd0": {
+                "data_depol": 0.0,
+                "meas_flip": 0.005,
+                "reset_flip": 0.005,
+                "gate_depol": 0.0
+            },
+            "realistic/dp0_mf0.005_rf0.005_gd0.004": {
+                "data_depol": 0.0,
+                "meas_flip": 0.005,
+                "reset_flip": 0.005,
+                "gate_depol": 0.004
+            }
         },
+        "active_noise": ["realistic/dp0_mf0.005_rf0.005_gd0.004"],
         "max_epochs": 20,
         "patience": 3,
-        "autocast": false,
+        "autocast": true,
         "dataset_dir": "dataset",
         "result_dir": "test_results",
         "weight_dir": "saved_weights"
@@ -21,7 +37,7 @@
             "enabled": true,
             "type": "image",
             "use_adj": false,
-            "batch_size": 256,
+            "batch_size": 2048,
             "lr": 0.001,
             "loss_weight": "linear",
             "params": {}
@@ -30,7 +46,7 @@
             "enabled": true,
             "type": "image",
             "use_adj": false,
-            "batch_size": 128,
+            "batch_size": 2048,
             "lr": 0.001,
             "loss_weight": "linear",
             "params": {
@@ -41,7 +57,7 @@
             "enabled": true,
             "type": "graph",
             "use_adj": true,
-            "batch_size": 256,
+            "batch_size": 2048,
             "lr": 0.001,
             "loss_weight": "linear",
             "params": {
@@ -53,7 +69,7 @@
             "enabled": true,
             "type": "graph",
             "use_adj": true,
-            "batch_size": 256,
+            "batch_size": 2048,
             "lr": 0.001,
             "loss_weight": "linear",
             "params": {
@@ -68,7 +84,7 @@
             "enabled": true,
             "type": "graph",
             "use_adj": true,
-            "batch_size": 256,
+            "batch_size": 2048,
             "lr": 0.001,
             "loss_weight": "linear",
             "params": {
@@ -82,7 +98,7 @@
             "enabled": true,
             "type": "graph",
             "use_adj": true,
-            "batch_size": 256,
+            "batch_size": 2048,
             "lr": 0.001,
             "loss_weight": "linear",
             "params": {
@@ -95,7 +111,7 @@
             "enabled": true,
             "type": "graph",
             "use_adj": false,
-            "batch_size": 512,
+            "batch_size": 2048,
             "lr": 0.001,
             "loss_weight": "linear",
             "params": {
@@ -107,9 +123,10 @@
             "enabled": true,
             "type": "graph",
             "use_adj": false,
-            "batch_size": 256,
+            "batch_size": 2048,
             "lr": 0.0001,
             "loss_weight": "sqrt",
+            "loss_type": "bce",
             "params": {
                 "d_model": 256,
                 "num_heads": 4,
@@ -121,9 +138,10 @@
             "enabled": true,
             "type": "graph",
             "use_adj": false,
-            "batch_size": 256,
-            "lr": 0.0001,
-            "loss_weight": "sqrt",
+            "batch_size": 2048,
+            "lr": 0.001,
+            "loss_weight": "linear",
+            "loss_type": "bce",
             "params": {
                 "d_model": 64,
                 "num_layers": 4,
