@@ -36,7 +36,7 @@ def _extract_data_qubit_indices(circuit: stim.Circuit) -> List[int]:
 def generate_dataset(
     distance: int, rounds: int, noise_rate: float, shots: int,
     error_type: str = "X",
-    meas_noise: float = 0.0, reset_noise: float = 0.0, gate_noise: float = 0.0,
+    data_depol: float = 0.0, meas_noise: float = 0.0, reset_noise: float = 0.0, gate_noise: float = 0.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Color Code용 (신드롬, 물리적 에러) 데이터셋을 생성합니다.
@@ -56,7 +56,7 @@ def generate_dataset(
     clean_circuit = stim.Circuit.generated(
         "color_code:memory_xyz",
         distance=distance, rounds=rounds,
-        before_round_data_depolarization=0,
+        before_round_data_depolarization=data_depol,
         before_measure_flip_probability=meas_noise,
         after_reset_flip_probability=reset_noise,
         after_clifford_depolarization=gate_noise,

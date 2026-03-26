@@ -35,6 +35,7 @@ from models.gnn import GNN
 from models.graph_transformer import GraphTransformer
 from models.graph_mamba import GraphMamba
 from utils.focal_loss import FocalLoss, CombinedLoss
+from logger import log_to_file
 from paths import ProjectPaths
 
 # ==============================================================================
@@ -87,6 +88,8 @@ KEYS = PATHS.load_keys()
 DISCORD_WEBHOOK_URL = KEYS.get("discord_simulation", "")
 
 def send_discord_alert(model_name, code_type, noise, d, p, err_type, ecr, acc, time_ms, best_epoch):
+    log_to_file(f"{model_name} | {code_type}/{noise} | d={d}, p={p}, {err_type} | ECR={ecr:.2f}% | Acc={acc:.2f}%")
+    
     if not DISCORD_WEBHOOK_URL:
         return
     
@@ -117,6 +120,7 @@ def send_discord_alert(model_name, code_type, noise, d, p, err_type, ecr, acc, t
             }]
         }, timeout=5)
     except:
+        log_to_file(f"Failed to send Discord alert: {model_name} | {code_type}/{noise} | d={d}, p={p}, {err_type} | ECR={ecr:.2f}% | Acc={acc:.2f}%")
         pass
 
 # ==============================================================================

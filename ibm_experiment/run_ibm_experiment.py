@@ -26,6 +26,7 @@ from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
 from decoders.ml_decoder_adapter import MLDecoderAdapter
 from evaluation.logical_error_rate import LogicalErrorRateEvaluator
+from logger import log_to_file
 from paths import ProjectPaths
 
 def parse_args():
@@ -47,6 +48,8 @@ KEYS = PATHS.load_keys()
 DISCORD_WEBHOOK_URL = KEYS.get("discord_ibm", "")
 
 def send_discord_alert(model_name, d, p, err_type, ler, total_shots, backend_name):
+    log_to_file(f"{model_name} | d={d}, p={p}, {err_type} | LER={ler:.4f} | Total Shots={total_shots}")
+    
     if not DISCORD_WEBHOOK_URL:
         return
     try:
@@ -60,7 +63,9 @@ def send_discord_alert(model_name, d, p, err_type, ler, total_shots, backend_nam
                 ], "footer": {"text": "STL Lab Server | IBM Phase 2"}}]
         }, timeout=5)
     except:
+        log_to_file(f"Failed to send Discord alert: {model_name} | d={d}, p={p}, {err_type} | LER={ler:.4f} | Total Shots={total_shots}")
         pass
+
 
 def save_results(results: list):
     output_dir = PATHS.experiment_result_dir("ibm")

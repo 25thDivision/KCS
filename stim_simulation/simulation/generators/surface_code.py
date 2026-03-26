@@ -8,7 +8,7 @@ def create_surface_code_circuit(distance: int, rounds: int, noise: float,
                                  reset_noise: float = 0.0,
                                  gate_noise: float = 0.0) -> stim.Circuit:
     return stim.Circuit.generated(
-        "surface_code:rotated_memory_x",
+        "surface_code:rotated_memory_z",
         distance=distance,
         rounds=rounds,
         before_round_data_depolarization=noise,
@@ -36,7 +36,7 @@ def _extract_data_qubit_indices(circuit: stim.Circuit) -> List[int]:
 def generate_dataset(
     distance: int, rounds: int, noise_rate: float, shots: int,
     error_type: str = "X",
-    meas_noise: float = 0.0, reset_noise: float = 0.0, gate_noise: float = 0.0,
+    data_depol: float = 0.0, meas_noise: float = 0.0, reset_noise: float = 0.0, gate_noise: float = 0.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Surface Code용 (신드롬, 물리적 에러) 데이터셋을 생성합니다.
@@ -54,9 +54,9 @@ def generate_dataset(
 
     # 실제 시뮬레이션용 회로 (dp=0, 에러는 수동 주입)
     clean_circuit = stim.Circuit.generated(
-        "surface_code:rotated_memory_x",
+        "surface_code:rotated_memory_z",
         distance=distance, rounds=rounds,
-        before_round_data_depolarization=0,
+        before_round_data_depolarization=data_depol,
         before_measure_flip_probability=meas_noise,
         after_reset_flip_probability=reset_noise,
         after_clifford_depolarization=gate_noise,

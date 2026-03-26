@@ -23,6 +23,7 @@ sys.path.append(CURRENT_DIR)
 sys.path.append(ROOT_DIR)
 
 from common.mapper_graph import SyndromeGraphMapper
+from logger import log_to_file
 from paths import ProjectPaths
 
 def parse_args():
@@ -70,6 +71,8 @@ KEYS = PATHS.load_keys()
 DISCORD_WEBHOOK_URL = KEYS.get("discord_generation", "")
 
 def send_discord_alert(code_type, noise, d, p, err_type, status, detail=""):
+    log_to_file(f"Graph/{code_type}/{noise} | d={d}, p={p}, {err_type} | Generation {status.upper()} | Detail: {detail}")
+    
     if not DISCORD_WEBHOOK_URL:
         return
     import requests
@@ -90,8 +93,8 @@ def send_discord_alert(code_type, noise, d, p, err_type, status, detail=""):
     
     # 2. Embed 구성 (Title은 심플하게, 복잡한 설정은 Description으로)
     embed = {
-        "title": f"{status_emoji} Dataset Generation: {status.upper()}",
-        "description": f"**Code**: `{code_type}`\n**Noise**: `{noise_type}` (`{noise_params}`)",
+        "title": f"{status_emoji} Graph Dataset Generation: {status.upper()}",
+        "description": f"**Code**: `{code_type}`\n**Noise Type**: `{noise_type}`\n**Noise Parameters**: `{noise_params}`",
         "color": status_color,
         "fields": [
             # 3. 주요 지표 3개를 한 줄에 나란히 배치
@@ -112,6 +115,8 @@ def send_discord_alert(code_type, noise, d, p, err_type, status, detail=""):
         pass
 
 def send_completion_alert(total_files, elapsed_min=None):
+    log_to_file("Graph dataset generation completed.")
+    
     if not DISCORD_WEBHOOK_URL:
         return
     import requests
@@ -119,7 +124,7 @@ def send_completion_alert(total_files, elapsed_min=None):
     time_str = f"{elapsed_min:.1f} min" if elapsed_min else "Unknown"
     
     embed = {
-        "title": "🎉 All Datasets Generated Successfully!",
+        "title": "🎉 All Graph Datasets Generated Successfully!",
         "color": 15258703, # 눈에 띄는 황금색/노란색
         "fields": [
             {"name": "📁 Total Files", "value": f"**{total_files}** files", "inline": True},
@@ -140,7 +145,7 @@ def send_completion_alert(total_files, elapsed_min=None):
 def _generate_chunk(code_type, d, p, err_type, count, np_):
     _, generate_dataset = get_generator(code_type)
     return generate_dataset(d, d, p, count, error_type=err_type,
-                            meas_noise=np_["meas_flip"], reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
+                            data_depol=np_["data_depol"], meas_noise=np_["meas_flip"], reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
 
 def generate_and_save(mapper, output_dir, code_type, d, p, err_type, total_samples, file_prefix, np_):
     num_chunks = int(np.ceil(total_samples / CHUNK_SIZE))

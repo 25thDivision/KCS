@@ -98,24 +98,40 @@ class IBMSimulator:
             counts = result.get_counts(circuit)
 
         elif self.backend_type == "qpu":
-            # 실제 QPU: SamplerV2 사용
             from qiskit_ibm_runtime import SamplerV2 as Sampler
 
-            # Transpile
-            transpiled = transpile(circuit, backend=self.backend, optimization_level=1)
-
+            transpiled = transpile(circuit, backend=self.backend, optimization_level=3)
             print(f"[IBMSimulator] Submitting (shots={shots}, qubits={transpiled.num_qubits}, "
                 f"depth={transpiled.depth()})")
 
-            sampler = Sampler(backend=self.backend)
+            sampler = Sampler(mode=self.backend)
             job = sampler.run([transpiled], shots=shots)
             print(f"[IBMSimulator] Job ID: {job.job_id()}")
             print(f"[IBMSimulator] Waiting for results...")
             result = job.result()
 
-            # SamplerV2 결과 → counts dict 변환
+            # SamplerV2: register별 결과를 하나의 bitstring으로 합치기
             pub_result = result[0]
-            counts = pub_result.data.meas.get_counts()
+            creg_names = [creg.name for creg in circuit.cregs]
+            print(f"[IBMSimulator] Classical registers: {creg_names}")
+
+            # 각 register의 bitarray를 shot별로 합침
+            from collections import Counter
+            bitstrings = []
+            num_shots = shots
+
+            for i in range(num_shots):
+                parts = []
+                for name in creg_names:
+                    reg_data = getattr(pub_result.data, name)
+                    # BitArray에서 i번째 shot의 비트값을 문자열로
+                    bits = reg_data.get_bitstrings()[i]
+                    parts.append(bits)
+                # Qiskit convention: "data_meas syn_r2 syn_r1 syn_r0"
+                full_bitstring = " ".join(reversed(parts))
+                bitstrings.append(full_bitstring)
+
+            counts = dict(Counter(bitstrings))
 
         else:
             # FakeBackend / Aer: 직접 실행

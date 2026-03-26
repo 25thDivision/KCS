@@ -1,6 +1,6 @@
 {
     "backend": {
-        "type": "simulator",
+        "type": "qpu",
         "backend_name": "ibm_yonsei",
         "shots": 1000
     },

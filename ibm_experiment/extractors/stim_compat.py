@@ -54,7 +54,7 @@ class StimFormatConverter:
             except ImportError:
                 import stim
                 return stim.Circuit.generated(
-                    "surface_code:rotated_memory_x",
+                    "surface_code:rotated_memory_z",
                     distance=self.distance,
                     rounds=self.num_rounds,
                     before_round_data_depolarization=0.001
