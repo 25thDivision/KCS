@@ -30,6 +30,7 @@ import sys
 import argparse
 import subprocess
 import time
+import json
 from datetime import datetime
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -186,22 +187,31 @@ def do_experiment(args):
         "ibm-baseline": os.path.join(IBM_DIR, "run_baseline_comparison.py"),
     }
 
+    if args.noise:
+        noise_list = args.noise
+    else:
+        import json
+        with open(os.path.join(STIM_DIR, "config.json"), "r") as f:
+            noise_list = json.load(f)["experiment"]["active_noise"]
+
     for platform in args.experiment:
         if platform not in valid:
             print(f"  ❌ Unknown: {platform}. Options: {valid}")
             continue
 
-        print(f"\n  --- {platform} ---")
-        cmd = ["python3", cmd_map[platform]]
+        for noise in noise_list:
+            print(f"\n  --- {platform} | weight: {noise} ---")
+            cmd = ["python3", cmd_map[platform]]
 
-        if args.models:
-            cmd += ["-m"] + args.models
+            if args.models:
+                cmd += ["-m"] + args.models
+            cmd += ["-n", noise]
 
-        if args.background:
-            log = f"experiment_{platform}_{timestamp()}.log"
-            run_cmd(cmd, cwd=ROOT_DIR, log_file=log, background=True)
-        else:
-            run_cmd(cmd, cwd=ROOT_DIR)
+            if args.background:
+                log = f"experiment_{platform}_{timestamp()}.log"
+                run_cmd(cmd, cwd=ROOT_DIR, log_file=log, background=True)
+            else:
+                run_cmd(cmd, cwd=ROOT_DIR)
 
     print(f"\n  ✅ All experiments complete!")
 

@@ -2,7 +2,7 @@
 
 echo "=== [1단계] d=3 Surface Code 생성 & d=3 IonQ 하드웨어 실험 (교차 병렬) ==="
 # d=3 생성과 동시에 d=3 모델들에 대한 IonQ 실험 시작
-python3 run_suite.py --generate -c surface_code -d 3 --cpu full &
+python3 run_suite.py  --experiment ibm -c surface_code -d 5 7 -m CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba &
 python3 run_suite.py --experiment ionq ionq-baseline -c color_code -d 3 -m CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba &
 
 echo "=== [대기] 1단계 작업들이 모두 끝날 때까지 얌전히 대기 중... ==="

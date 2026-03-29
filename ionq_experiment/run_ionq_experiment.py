@@ -33,6 +33,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="IonQ Phase 2 Experiment")
     parser.add_argument("-m", "--models", nargs="+", type=str, default=None,
                         help="실행할 모델 (미지정 시 config의 top_models)")
+    parser.add_argument("-n", "--noise", type=str, default=None,
+                        help="노이즈 프로파일 (미지정 시 config의 noise)")
     return parser.parse_args()
 
 ARGS = parse_args()
@@ -47,23 +49,30 @@ CONFIG = load_config()
 KEYS = PATHS.load_keys()
 DISCORD_WEBHOOK_URL = KEYS.get("discord_ionq", "")
 
-def send_discord_alert(model_name, d, p, err_type, ler, total_shots, noise_model):
-    log_to_file(f"{model_name} | d={d}, p={p}, {err_type} | LER={ler:.4f} | Total Shots={total_shots}")
+def send_discord_alert(model_name, d, p, err_type, ler, total_shots, noise_model, weight_noise):
+    # noise 분리
+    try:
+        wn_type, wn_params = weight_noise.split('/')
+        wn_type = wn_type.capitalize()
+    except ValueError:
+        wn_type, wn_params = weight_noise, "N/A"
     
-    if not DISCORD_WEBHOOK_URL:
-        return
+    log_to_file(f"IonQ | {model_name} | d={d}, p={p}, {err_type} | {wn_params} | LER={ler:.4f}")
+
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={
             "content": f"🔬 **[IonQ Phase 2] {model_name} Evaluated!**",
-            "embeds": [{"title": f"d={d}, p={p}, {err_type} | {noise_model}", "color": 3447003,
+            "embeds": [{"title": f"📊 Color Code Experiment Results",
+                "description": f"**Weight**: `{wn_type}` (`{wn_params}`)\n**Setting**: `d={d}`, `p={p}`, Error: `{err_type}`",
+                "color": 3447003,
                 "fields": [
-                    {"name": "LER", "value": f"{ler:.4f}", "inline": True},
-                    {"name": "Total Shots", "value": str(total_shots), "inline": True},
-                    {"name": "Model", "value": model_name, "inline": True},
-                ], "footer": {"text": "STL Lab Server | IonQ Phase 2"}}]
+                    {"name": "🎯 LER", "value": f"{ler:.4f}", "inline": True},
+                    {"name": "📊 Total Shots", "value": str(total_shots), "inline": True},
+                    {"name": "🤖 Model", "value": model_name, "inline": True},
+                ], "footer": {"text": f"STL Lab Server | IonQ Phase 2 | {noise_model}"}}]
         }, timeout=5)
     except:
-        log_to_file(f"Failed to send Discord alert: {model_name} | d={d}, p={p}, {err_type} | LER={ler:.4f} | Total Shots={total_shots}")
+        log_to_file(f"IonQ | Failed to send Discord alert: {model_name} | d={d}, p={p}, {err_type} | {wn_params} | LER={ler:.4f}")
         pass
 
 def save_results(results: list):
@@ -71,15 +80,15 @@ def save_results(results: list):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(output_dir, f"phase2_results_{timestamp}.csv")
     headers = ["Model", "Distance", "Num_Rounds", "Noise_Model", "Shots",
-               "Stim_Error_Rate", "Stim_Error_Type",
-               "Logical_Error_Rate", "Total_Shots", "Logical_Errors", "Timestamp"]
+           "Stim_Error_Rate", "Stim_Error_Type", "Weight_Noise",
+           "Logical_Error_Rate", "Total_Shots", "Logical_Errors", "Timestamp"]
     with open(filepath, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(headers)
         for r in results:
             writer.writerow([r["model_name"], r["distance"], r["num_rounds"],
-                r["noise_model"], r["shots"], r["stim_error_rate"], r["stim_error_type"],
-                f"{r['logical_error_rate']:.6f}", r["total_shots"], r["logical_errors"], timestamp])
+                            r["noise_model"], r["shots"], r["stim_error_rate"], r["stim_error_type"],
+                            r["weight_noise"], f"{r['logical_error_rate']:.6f}", r["total_shots"], r["logical_errors"], timestamp])
     print(f"\n>>> Results saved to: {filepath}")
 
 def run_pipeline(config: dict):
@@ -88,18 +97,18 @@ def run_pipeline(config: dict):
     eval_cfg = config["evaluation"]
 
     code_type = eval_cfg["code_type"]
-    noise = eval_cfg["noise"]
 
     # CLI 모델 우선, 없으면 config
     top_models = ARGS.models if ARGS.models else eval_cfg["top_models"]
-
+    noise = ARGS.noise if ARGS.noise else eval_cfg["noise"]
+    
     results = []
 
     for distance in code_cfg["distances"]:
         num_rounds = code_cfg["num_rounds_per_distance"][str(distance)]
 
         print(f"\n{'='*70}")
-        print(f"  Phase 2: d={distance}, rounds={num_rounds}, noise={backend_cfg['noise_model']}")
+        print(f"  Phase 2: d={distance}, rounds={num_rounds}, noise={noise}")
         print(f"  Models: {top_models}")
         print(f"{'='*70}")
 
@@ -132,6 +141,25 @@ def run_pipeline(config: dict):
             logical_z=syn_indices["logical_z"],
             initial_logical_state=code_cfg["logical_initial_state"]
         )
+        
+        # No Correction 측정 (동일 shot)
+        no_correction = np.zeros_like(data_states)
+        nc_result = evaluator.evaluate(data_states, no_correction, shot_counts)
+        nc_ler = nc_result["logical_error_rate"]
+        print(f"\n📊 IonQ No Correction: LER={nc_ler:.4f} ({nc_result['logical_errors']}/{nc_result['total_shots']})")
+
+        send_discord_alert("No_Correction", distance, 0, "N/A",
+                        nc_ler, nc_result["total_shots"], backend_cfg["noise_model"], noise)
+        
+        results.append({
+            "model_name": "No_Correction", "distance": distance,
+            "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
+            "shots": backend_cfg["shots"], "stim_error_rate": 0,
+            "stim_error_type": "N/A", "weight_noise": noise,
+            "logical_error_rate": nc_ler,
+            "total_shots": nc_result["total_shots"],
+            "logical_errors": nc_result["logical_errors"],
+        })
 
         for model_name in top_models:
             model_type = eval_cfg["model_type_map"].get(model_name, "graph")
@@ -158,7 +186,9 @@ def run_pipeline(config: dict):
                             print(f"        Input shape: {model_input.shape} (image)")
                     except Exception as e:
                         print(f"    ❌ Format conversion failed: {e}")
+                        log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED format: {e}")
                         continue
+
 
                     try:
                         decoder = MLDecoderAdapter(
@@ -168,6 +198,7 @@ def run_pipeline(config: dict):
                         )
                     except Exception as e:
                         print(f"    ❌ Model load failed: {e}")
+                        log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED model load: {e}")
                         continue
 
                     try:
@@ -175,6 +206,7 @@ def run_pipeline(config: dict):
                         print(f"        Corrections shape: {corrections.shape}")
                     except Exception as e:
                         print(f"    ❌ Inference failed: {e}")
+                        log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED inference: {e}")
                         continue
 
                     eval_result = evaluator.evaluate(data_states, corrections, shot_counts)
@@ -183,13 +215,13 @@ def run_pipeline(config: dict):
                           f"({eval_result['logical_errors']}/{eval_result['total_shots']})")
 
                     send_discord_alert(model_name, distance, p, err_type,
-                                       ler, eval_result["total_shots"], backend_cfg["noise_model"])
+                                       ler, eval_result["total_shots"], backend_cfg["noise_model"], noise)
 
                     results.append({
                         "model_name": model_name, "distance": distance,
                         "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
                         "shots": backend_cfg["shots"], "stim_error_rate": p,
-                        "stim_error_type": err_type, "logical_error_rate": ler,
+                        "stim_error_type": err_type, "weight_noise": noise, "logical_error_rate": ler,
                         "total_shots": eval_result["total_shots"],
                         "logical_errors": eval_result["logical_errors"],
                     })

@@ -6,6 +6,10 @@ import os
 import sys
 import json
 import numpy as np
+import csv
+import argparse
+from datetime import datetime
+from logger import log_to_file
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
@@ -26,10 +30,36 @@ from paths import ProjectPaths
 
 PATHS = ProjectPaths(root_dir)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="IonQ Baseline Comparison")
+    parser.add_argument("-n", "--noise", type=str, default=None,
+                        help="노이즈 프로파일 (미지정 시 config의 noise)")
+    parser.add_argument("-m", "--models", nargs="+", type=str, default=None,
+                        help="실행할 모델 (미지정 시 config의 top_models)")
+    return parser.parse_args()
+
+ARGS = parse_args()
+
 def load_config():
     config_path = os.path.join(current_dir, "config.json")
     with open(config_path, "r") as f:
         return json.load(f)
+
+def save_baseline_csv(all_results, platform, noise):
+    output_dir = PATHS.experiment_result_dir("ionq")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = os.path.join(output_dir, f"baseline_results_{timestamp}.csv")
+    headers = ["Method", "Distance", "Num_Rounds", "Platform",
+               "Weight_Noise", "Logical_Error_Rate", "Total_Shots",
+               "Logical_Errors", "Timestamp"]
+    with open(filepath, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        for r in all_results:
+            writer.writerow([r["method"], r["distance"], r["num_rounds"],
+                platform, noise, f"{r['ler']:.6f}",
+                r["total_shots"], r["logical_errors"], timestamp])
+    print(f">>> Baseline results saved to: {filepath}")
 
 def main():
     print("=" * 60)
@@ -42,7 +72,10 @@ def main():
     eval_cfg = config["evaluation"]
 
     code_type = eval_cfg["code_type"]
-    noise = eval_cfg["noise"]
+    noise = ARGS.noise if ARGS.noise else eval_cfg["noise"]
+    top_models = ARGS.models if ARGS.models else eval_cfg["top_models"]
+
+    all_results = []
 
     for distance in code_cfg["distances"]:
         num_rounds = code_cfg["num_rounds_per_distance"][str(distance)]
@@ -73,7 +106,7 @@ def main():
 
         ml_corrections = {}
 
-        for model_name in eval_cfg["top_models"]:
+        for model_name in top_models:
             weight_path = PATHS.stim_weight(code_type, noise, model_name, distance, 0.01, "X")
 
             if not os.path.exists(weight_path):
@@ -93,6 +126,7 @@ def main():
                 ml_corrections[f"ML: {model_name} (p=0.01)"] = corrections
             except Exception as e:
                 print(f"    ❌ {model_name} failed: {e}")
+                log_to_file(f"[BASELINE] {model_name} | d={distance} | FAILED: {e}")
 
         results = run_baseline_comparison(
             syndromes=syndromes,
@@ -103,6 +137,21 @@ def main():
             initial_state=code_cfg["logical_initial_state"],
         )
         print_comparison(results)
+
+        # 결과 수집
+        for r in results:
+            all_results.append({
+                "method": r["method"],
+                "distance": distance,
+                "num_rounds": num_rounds,
+                "ler": r["ler"],
+                "total_shots": r["total_shots"],
+                "logical_errors": r["logical_errors"],
+            })
+            log_to_file(f"[BASELINE] {r['method']} | d={distance} | weight={noise} | LER={r['ler']:.4f} | weight={noise}")
+
+    if all_results:
+        save_baseline_csv(all_results, backend_cfg["noise_model"], noise)
 
 if __name__ == "__main__":
     main()
