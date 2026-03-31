@@ -77,8 +77,8 @@ class ProjectPaths:
         )
 
     def stim_result_dir(self, code_type: str, noise: str) -> str:
-        """stim_simulation/test_results/{code}/{noise}/"""
-        path = os.path.join(self.stim_dir, "test_results", code_type, noise)
+        """stim_simulation/results/{code}/{noise}/"""
+        path = os.path.join(self.stim_dir, "results", code_type, noise)
         os.makedirs(path, exist_ok=True)
         return path
 

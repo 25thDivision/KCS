@@ -1,6 +1,6 @@
 {
     "backend": {
-        "type": "qpu",
+        "type": "simulator",
         "backend_name": "ibm_yonsei",
         "shots": 1000
     },
@@ -16,7 +16,7 @@
     "evaluation": {
         "code_type": "surface_code",
         "noise": "realistic/dp0_mf0.005_rf0.005_gd0.004",
-        "top_models": ["CNN", "GCN", "GCNII", "GAT", "APPNP", "GNN"],
+        "top_models": ["CNN", "GCN", "GCNII", "GAT", "APPNP", "GNN", "GraphTransformer", "GraphMamba"],
         "model_type_map": {
             "CNN": "image",
             "UNet": "image",

@@ -78,9 +78,9 @@ def send_discord_alert(model_name, d, p, err_type, ler, total_shots, backend_nam
 
 
 def save_results(results: list):
-    output_dir = PATHS.experiment_result_dir("ibm")
+    output_dir = os.path.join(PATHS.experiment_result_dir("ibm"), results[0]["weight_noise"])
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(output_dir, f"phase2_results_{timestamp}.csv")
+    filepath = os.path.join(output_dir, f"ibm_results_{timestamp}.csv")
     headers = ["Model", "Distance", "Num_Rounds", "Backend", "Shots",
                "Stim_Error_Rate", "Stim_Error_Type", "Weight_Noise",
                "Logical_Error_Rate", "Total_Shots", "Logical_Errors", "Timestamp"]
@@ -157,7 +157,7 @@ def run_pipeline(config: dict):
         
         results.append({
             "model_name": "No_Correction", "distance": distance,
-            "num_rounds": num_rounds, "noise_model": backend_cfg["backend_name"],
+            "num_rounds": num_rounds, "backend": backend_cfg["backend_name"],
             "shots": backend_cfg["shots"], "stim_error_rate": 0,
             "stim_error_type": "N/A", "weight_noise": noise,
             "logical_error_rate": nc_ler,

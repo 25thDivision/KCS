@@ -80,11 +80,12 @@ class StimFormatConverter:
 
     def _initialize_mappers(self):
         """Stim 매퍼를 초기화합니다."""
-        from common.mapper_graph import SyndromeGraphMapper
-        from common.mapper_image import SyndromeImageMapper
+        from common.mapper_colorcode import ColorCodeGraphMapper, ColorCodeImageMapper
 
-        self.graph_mapper = SyndromeGraphMapper(self.stim_circuit)
-        self.image_mapper = SyndromeImageMapper(self.stim_circuit)
+        x_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
+        z_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
+        self.graph_mapper = ColorCodeGraphMapper(self.distance, self.num_rounds, x_stabs, z_stabs)
+        self.image_mapper = ColorCodeImageMapper(self.distance, self.num_rounds, 6)
         self.edge_index = self.graph_mapper.get_edges()
 
         # Phase 1 학습에 사용된 엣지 파일이 있으면 우선 사용

@@ -185,10 +185,26 @@ def main():
             for d in DISTANCES:
                 train_count, test_count = TRAIN_SAMPLES[d], TEST_SAMPLES[d]
                 print(f"\n>>> d={d} (Train: {train_count}, Test: {test_count})")
-                circuit = create_circuit(d, d, 0.001, meas_noise=np_["meas_flip"],
-                                         reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
-                mapper = SyndromeGraphMapper(circuit)
+                
+                if code_type == "surface_code":
+                    from common.mapper_surface import SurfaceCodeGraphMapper
+                    # Qiskit에서 stabilizer 정보 가져오기
+                    from ibm_experiment.circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
+                    sc = SurfaceCodeCircuit(distance=d, num_rounds=d)
+                    syn = sc.get_syndrome_indices()
+                    mapper = SurfaceCodeGraphMapper(d, d, syn["x_stabilizers"], syn["z_stabilizers"])
+                elif code_type == "color_code":
+                    from common.mapper_color import ColorCodeGraphMapper
+                    x_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
+                    z_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
+                    mapper = ColorCodeGraphMapper(d, d, x_stabs, z_stabs)
+                else:
+                    circuit = create_circuit(d, d, 0.001, meas_noise=np_["meas_flip"],
+                                            reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
+                    mapper = SyndromeGraphMapper(circuit)
+                
                 edge_path = PATHS.stim_edge(code_type, noise, d)
+                
                 if not os.path.exists(edge_path):
                     np.save(edge_path, mapper.get_edges())
                     print(f"    - Saved Edges: {edge_path}")

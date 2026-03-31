@@ -76,9 +76,9 @@ def send_discord_alert(model_name, d, p, err_type, ler, total_shots, noise_model
         pass
 
 def save_results(results: list):
-    output_dir = PATHS.experiment_result_dir("ionq")
+    output_dir = os.path.join(PATHS.experiment_result_dir("ionq"), results[0]["weight_noise"])
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(output_dir, f"phase2_results_{timestamp}.csv")
+    filepath = os.path.join(output_dir, f"ionq_results_{timestamp}.csv")
     headers = ["Model", "Distance", "Num_Rounds", "Noise_Model", "Shots",
            "Stim_Error_Rate", "Stim_Error_Type", "Weight_Noise",
            "Logical_Error_Rate", "Total_Shots", "Logical_Errors", "Timestamp"]

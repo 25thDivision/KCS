@@ -86,11 +86,18 @@ class StimFormatConverter:
         return self.stim_data_qubit_indices
 
     def _initialize_mappers(self):
-        from common.mapper_graph import SyndromeGraphMapper
-        from common.mapper_image import SyndromeImageMapper
+        from common.mapper_surface import SurfaceCodeGraphMapper, SurfaceCodeImageMapper
 
-        self.graph_mapper = SyndromeGraphMapper(self.stim_circuit)
-        self.image_mapper = SyndromeImageMapper(self.stim_circuit)
+        # Qiskit에서 stabilizer 정보 가져오기
+        from circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
+        sc = SurfaceCodeCircuit(distance=self.distance, num_rounds=self.num_rounds)
+        syn = sc.get_syndrome_indices()
+
+        self.graph_mapper = SurfaceCodeGraphMapper(
+            self.distance, self.num_rounds,
+            syn["x_stabilizers"], syn["z_stabilizers"])
+        self.image_mapper = SurfaceCodeImageMapper(
+            self.distance, self.num_rounds, syn["num_stabilizers"])
         self.edge_index = self.graph_mapper.get_edges()
 
         if self.edge_dir is not None:

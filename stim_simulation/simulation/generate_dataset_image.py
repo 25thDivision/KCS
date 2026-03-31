@@ -185,10 +185,18 @@ def main():
             for d in DISTANCES:
                 train_count, test_count = TRAIN_SAMPLES[d], TEST_SAMPLES[d]
                 print(f"\n>>> d={d} (Train: {train_count}, Test: {test_count})")
-                circuit = create_circuit(d, d, 0.001, meas_noise=np_["meas_flip"],
-                                         reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
-                mapper = SyndromeImageMapper(circuit)
-
+                
+                if code_type == "surface_code":
+                    from common.mapper_surface import SurfaceCodeImageMapper
+                    mapper = SurfaceCodeImageMapper(d, d, 8)  # num_stabilizers
+                elif code_type == "color_code":
+                    from common.mapper_color import ColorCodeImageMapper
+                    mapper = ColorCodeImageMapper(d, d, 6)
+                else:
+                    circuit = create_circuit(d, d, 0.001, meas_noise=np_["meas_flip"],
+                             reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
+                    mapper = SyndromeGraphMapper(circuit)
+                
                 for p in NOISE_RATES:
                     for err_type in ERROR_TYPES:
                         send_discord_alert(code_type, noise, d, p, err_type, "start",
