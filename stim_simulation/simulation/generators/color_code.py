@@ -91,6 +91,17 @@ COLORCODE_DATA_COORDS = {
 # Data qubit 수
 COLORCODE_NUM_DATA = {3: 7, 5: 19, 7: 37}
 
+# Face 색상 (R=0.0, G=0.5, B=1.0)
+# d=3: P0=R, P1=G, P2=B
+# d=5: R={P0,P1,P6}, G={P2,P3,P7}, B={P4,P5,P8}
+# d=7: 동일 패턴으로 확장 (Stim에서 추출)
+COLORCODE_FACE_COLORS = {
+    3: [0.0, 0.5, 1.0],           # R, G, B
+    5: [0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 0.0, 0.5, 1.0],
+    7: [0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.0, 0.5, 1.0,
+        0.5, 0.5, 0.0, 1.0, 0.5, 1.0, 1.0, 0.0, 1.0],
+}
+
 
 def _get_code_config(distance: int) -> dict:
     """Distance에 따른 코드 구성 정보를 반환합니다."""

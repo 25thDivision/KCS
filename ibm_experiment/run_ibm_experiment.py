@@ -20,7 +20,7 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(current_dir)
 sys.path.append(root_dir)
 
-from circuits.heavyhex_surface_code import HeavyHexSurfaceCode as SurfaceCodeCircuit
+from circuits.heavyhex_surface_code_depth7 import HeavyHexSurfaceCode as SurfaceCodeCircuit
 from simulators.ibm_simulator import IBMSimulator
 from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
@@ -96,7 +96,7 @@ def save_results(results: list):
 
 def run_pipeline(config: dict):
     backend_cfg = config["backend"]
-    code_cfg = config["surface_code"]
+    code_cfg = config.get("heavyhex_surface_code", config.get("surface_code"))
     eval_cfg = config["evaluation"]
 
     code_type = eval_cfg["code_type"]
@@ -137,7 +137,7 @@ def run_pipeline(config: dict):
         edge_dir = PATHS.stim_data_dir(code_type, noise, "graph")
         converter = StimFormatConverter(
             distance=distance, num_rounds=num_rounds,
-            edge_dir=edge_dir
+            edge_dir=edge_dir, code_type=code_type
         )
 
         stim_data_indices = converter.get_data_qubit_indices()

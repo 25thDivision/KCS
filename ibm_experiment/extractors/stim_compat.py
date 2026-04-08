@@ -1,8 +1,20 @@
 """
-IBM 신드롬 → Stim 호환 형태 변환기 (Surface Code용)
+IBM Heavy-Hex Surface Code 신드롬 → Stim 호환 형태 변환기
 
-Data qubit 인덱스를 자동 추출하여, 모델 출력에서 올바른 위치만 가져올 수 있게 합니다.
-Stim의 rotated surface code는 (홀수, 홀수) 좌표가 data qubit입니다.
+heavyhex_surface_code_depth7 회로에서 나온 HW syndrome을
+Phase 1 ML 모델이 기대하는 입력 형태로 변환합니다.
+
+핵심 변환:
+  1. Temporal differencing (no-reset XOR tracking)
+  2. HW syndrome 순서 → Stim TRUE stabilizer 순서 재배열
+     (Z stab만 매핑, X stab은 0 마스킹 → reorder_hw_to_stim())
+  3. SurfaceCodeGraphMapper / SurfaceCodeImageMapper로 ML 입력 생성
+
+HW per-cycle 8 bits:
+  [Z1, X1, Xb_right, Zb_top, Z2, X2, Xb_left, Zb_bot]
+
+Stim per-round 8 bits:
+  [Z{0134}, Z{1245}, Z{01}, Z{78}, X{0126}, X{2346}, X{25}, X{78}]
 """
 
 import os
@@ -21,132 +33,145 @@ sys.path.append(stim_sim_dir)
 
 
 class StimFormatConverter:
-    def __init__(self, distance: int, num_rounds: int, edge_dir: str = None):
+    """
+    IBM Heavy-Hex 신드롬을 Phase 1 ML 모델 입력으로 변환합니다.
+
+    Parameters:
+        distance: Code distance (3 only)
+        num_rounds: QEC 라운드 수 (= num_cycles)
+        edge_dir: Phase 1 edge 파일 디렉토리 (stim_data_dir)
+        code_type: "heavyhex_surface_code" (기본값)
+    """
+
+    def __init__(self, distance: int, num_rounds: int,
+                 edge_dir: str = None, code_type: str = "heavyhex_surface_code"):
         self.distance = distance
         self.num_rounds = num_rounds
         self.edge_dir = edge_dir
+        self.code_type = code_type
 
-        self.stim_circuit = self._create_stim_reference()
-        self.num_stim_detectors = self.stim_circuit.num_detectors
-        self.num_stim_qubits = self.stim_circuit.num_qubits
+        # Heavyhex 설정 로드
+        from generators.heavyhex_surface_code import (
+            HEAVYHEX_D3, create_heavyhex_surface_code_circuit
+        )
+        self.cfg = HEAVYHEX_D3
+        self.num_stabilizers = self.cfg["num_ancilla"]  # 8
 
-        # Data qubit 인덱스 추출
-        self.stim_data_qubit_indices = self._extract_data_qubit_indices()
+        # Stim 참조 회로 (detector 수 확인용)
+        self.stim_circuit = create_heavyhex_surface_code_circuit(
+            distance=distance, rounds=num_rounds, noise=0.001
+        )
+        self.num_stim_detectors = self.num_rounds * self.num_stabilizers
 
+        # Data qubit indices (Stim 기준: 0-8)
+        self.stim_data_qubit_indices = list(range(self.cfg["num_data"]))
+
+        # Mapper 초기화
         self.graph_mapper = None
         self.image_mapper = None
         self.edge_index = None
-
         self._initialize_mappers()
 
-        print(f"[StimFormatConverter] Initialized for d={distance}, rounds={num_rounds}")
-        print(f"    Stim total qubits: {self.num_stim_qubits}")
-        print(f"    Stim data qubits: {len(self.stim_data_qubit_indices)} at indices {self.stim_data_qubit_indices}")
+        print(f"[StimFormatConverter] Initialized for heavyhex d={distance}, rounds={num_rounds}")
         print(f"    Stim detectors: {self.num_stim_detectors}")
+        print(f"    Data qubits: {len(self.stim_data_qubit_indices)}")
         print(f"    Graph nodes: {self.graph_mapper.num_nodes}")
 
-    def _create_stim_reference(self):
-        try:
-            from generators.surface_code import create_surface_code_circuit
-        except ImportError:
-            try:
-                from simulation.generators.surface_code import create_surface_code_circuit
-            except ImportError:
-                import stim
-                return stim.Circuit.generated(
-                    "surface_code:rotated_memory_z",
-                    distance=self.distance,
-                    rounds=self.num_rounds,
-                    before_round_data_depolarization=0.001
-                )
-        return create_surface_code_circuit(self.distance, self.num_rounds, 0.001)
-
-    def _extract_data_qubit_indices(self) -> List[int]:
-        """
-        Stim 회로에서 data qubit 인덱스를 추출합니다.
-
-        Rotated surface code에서 (홀수, 홀수) 좌표가 data qubit입니다.
-        """
-        data_indices = []
-
-        for instruction in self.stim_circuit.flattened():
-            if instruction.name == "QUBIT_COORDS":
-                coords = instruction.gate_args_copy()
-                targets = instruction.targets_copy()
-                for t in targets:
-                    x, y = coords[0], coords[1]
-                    if int(x) % 2 == 1 and int(y) % 2 == 1:
-                        data_indices.append(t.value)
-
-        data_indices.sort()
-        return data_indices
-
-    def get_data_qubit_indices(self) -> List[int]:
-        """모델 출력에서 data qubit에 해당하는 인덱스를 반환합니다."""
-        return self.stim_data_qubit_indices
-
     def _initialize_mappers(self):
+        """Heavyhex TRUE stabilizer 기반 mapper 초기화."""
         from common.mapper_surface import SurfaceCodeGraphMapper, SurfaceCodeImageMapper
 
-        # Qiskit에서 stabilizer 정보 가져오기
-        from circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
-        sc = SurfaceCodeCircuit(distance=self.distance, num_rounds=self.num_rounds)
-        syn = sc.get_syndrome_indices()
+        cfg = self.cfg
+        z_stabs = [cfg["z_stabilizers"][a] for a in cfg["z_ancilla"]]
+        x_stabs = [cfg["x_stabilizers"][a] for a in cfg["x_ancilla"]]
 
         self.graph_mapper = SurfaceCodeGraphMapper(
-            self.distance, self.num_rounds,
-            syn["x_stabilizers"], syn["z_stabilizers"])
+            self.distance, self.num_rounds, z_stabs, x_stabs
+        )
         self.image_mapper = SurfaceCodeImageMapper(
-            self.distance, self.num_rounds, syn["num_stabilizers"])
+            self.distance, self.num_rounds, self.num_stabilizers
+        )
         self.edge_index = self.graph_mapper.get_edges()
 
+        # Phase 1에서 저장한 edge 파일이 있으면 로드
+        edge_path = None
         if self.edge_dir is not None:
             edge_path = os.path.join(self.edge_dir, f"edges_d{self.distance}.npy")
         else:
             edge_path = os.path.join(
-                stim_dir, "dataset", "surface_code", "graph",
+                stim_dir, "dataset", self.code_type, "graph",
                 f"edges_d{self.distance}.npy"
             )
 
-        if os.path.exists(edge_path):
+        if edge_path and os.path.exists(edge_path):
             self.edge_index = np.load(edge_path)
-            print(f"    Loaded Phase 1 edges from: {edge_path}")
+            print(f"    Loaded Phase 1 edges: {edge_path}")
         else:
-            print(f"    [Warning] Edge file not found: {edge_path}")
-            print(f"    Using edges from SyndromeGraphMapper instead.")
+            print(f"    Using edges from SurfaceCodeGraphMapper")
 
-    def ionq_to_stim_detectors(self, raw_syndromes: np.ndarray) -> np.ndarray:
+    def get_data_qubit_indices(self) -> List[int]:
+        """모델 출력에서 data qubit에 해당하는 인덱스."""
+        return self.stim_data_qubit_indices
+
+    def hw_to_stim_detectors(self, raw_syndromes: np.ndarray) -> np.ndarray:
+        """
+        HW raw syndrome → Stim-compatible flat detector 배열로 변환.
+
+        처리 순서:
+          1. Temporal differencing (no-reset XOR tracking)
+          2. HW → Stim 순서 재배열 (Z만 매핑, X 마스킹)
+
+        Args:
+            raw_syndromes: (N, num_rounds, 8) — HW 측정 순서 per-cycle
+
+        Returns:
+            stim_detectors: (N, num_rounds * 8) — Stim 순서, temporal-differenced
+        """
+        from generators.heavyhex_surface_code import reorder_hw_to_stim
+
         N, num_rounds, num_stab = raw_syndromes.shape
 
-        detectors = np.zeros((N, num_rounds, num_stab), dtype=np.float32)
+        # Step 1: Temporal differencing (no-reset 보정)
+        detectors = np.zeros_like(raw_syndromes)
         detectors[:, 0, :] = raw_syndromes[:, 0, :]
         for r in range(1, num_rounds):
-            detectors[:, r, :] = (raw_syndromes[:, r, :] != raw_syndromes[:, r - 1, :]).astype(np.float32)
+            detectors[:, r, :] = (
+                raw_syndromes[:, r, :] != raw_syndromes[:, r - 1, :]
+            ).astype(np.float32)
 
-        flat_detectors = detectors.reshape(N, -1)
+        # Step 2: Flatten → (N, num_rounds * 8)
+        flat_hw = detectors.reshape(N, -1)
 
-        if flat_detectors.shape[1] < self.num_stim_detectors:
-            padded = np.zeros((N, self.num_stim_detectors), dtype=np.float32)
-            padded[:, :flat_detectors.shape[1]] = flat_detectors
-            flat_detectors = padded
-            print(f"    [Warning] Padded to {self.num_stim_detectors} detectors")
-        elif flat_detectors.shape[1] > self.num_stim_detectors:
-            flat_detectors = flat_detectors[:, :self.num_stim_detectors]
-            print(f"    [Warning] Truncated to {self.num_stim_detectors} detectors")
+        # Step 3: HW → Stim 순서 재배열 (Z만 매핑, X = 0)
+        flat_stim = reorder_hw_to_stim(flat_hw, num_rounds)
 
-        return flat_detectors
+        return flat_stim
 
     def to_graph_format(self, raw_syndromes: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        stim_detectors = self.ionq_to_stim_detectors(raw_syndromes)
+        """
+        HW syndrome → Graph 모델 입력.
+
+        Returns:
+            node_features: (N, num_nodes, feature_dim)
+            edge_index: (2, num_edges)
+        """
+        stim_detectors = self.hw_to_stim_detectors(raw_syndromes)
         node_features = self.graph_mapper.map_to_node_features(stim_detectors)
         return node_features, self.edge_index
 
     def to_image_format(self, raw_syndromes: np.ndarray) -> np.ndarray:
-        stim_detectors = self.ionq_to_stim_detectors(raw_syndromes)
+        """
+        HW syndrome → Image 모델 입력.
+
+        Returns:
+            images: (N, 1, H, W)
+        """
+        stim_detectors = self.hw_to_stim_detectors(raw_syndromes)
         images = self.image_mapper.map_to_images(stim_detectors)
         return images
 
     def get_model_input_shape(self, model_type: str) -> tuple:
+        """모델 타입에 따른 예상 입력 shape."""
         if model_type == "graph":
             return (self.graph_mapper.num_nodes, 6)
         elif model_type == "image":

@@ -38,10 +38,14 @@ class ColorCodeGraphMapper:
 
         self.stab_types = [0] * len(x_stabilizers) + [1] * len(z_stabilizers)
 
-        # 색상: face index 기반 정규화
+        # 색상: R=0.0, G=0.5, B=1.0 (face별 color group)
+        from generators.color_code import COLORCODE_FACE_COLORS
         num_faces = len(x_stabilizers)
-        face_colors = [i / max(1, num_faces - 1) for i in range(num_faces)]
-        self.stab_colors = face_colors + face_colors  # X faces + Z faces
+        if distance in COLORCODE_FACE_COLORS:
+            face_colors = COLORCODE_FACE_COLORS[distance]
+        else:
+            face_colors = [i / max(1, num_faces - 1) for i in range(num_faces)]
+        self.stab_colors = list(face_colors) + list(face_colors)  # X + Z
 
         # 좌표
         if data_coords:

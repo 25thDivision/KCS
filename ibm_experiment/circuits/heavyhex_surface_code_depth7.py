@@ -65,7 +65,14 @@ ALL_PHYSICAL = sorted(set(
 
 
 class HeavyHexSurfaceCode:
-    def __init__(self, num_cycles: int = 1, dd: bool = True):
+    def __init__(self, num_cycles: int = 1, dd: bool = True,
+                 distance: int = 3, num_rounds: int = None,
+                 backend_name: str = "ibm_boston"):
+        if distance != 3:
+            raise NotImplementedError("Only d=3 supported for heavy-hex embedding.")
+        if num_rounds is not None:
+            num_cycles = num_rounds
+
         self.num_cycles = num_cycles
         self.dd = dd
         self.distance = 3
@@ -73,6 +80,13 @@ class HeavyHexSurfaceCode:
         self._phys = ALL_PHYSICAL
         self._p2i = {p: i for i, p in enumerate(self._phys)}
         self._nq = len(self._phys)
+
+        # Pipeline 호환 속성
+        self.num_stabilizers = 8         # 8 operators per cycle
+        self.num_rounds = num_cycles     # alias: 1 HW cycle = 1 Stim round
+        self.backend_name = backend_name
+        self._hw_syn_per_cycle = 8
+        self._hw_syn_total = 8 * num_cycles + 2
 
     def q(self, phys: int) -> int:
         return self._p2i[phys]
@@ -256,7 +270,6 @@ class HeavyHexSurfaceCode:
         self._dd_idle(qc, {r["B"], r["C"], r["E"], r["A"], r["D"], r["F"],
                            r["br_AB"], r["br_CD"], r["br_EF"]})
         return syn_bit
-        return syn_bit
 
     def _final_unfold(self, qc, last_rnd, syn_bit, cr_syn):
         """Unfold ALL folded qubits + measure deferred boundaries before data measurement."""
@@ -288,6 +301,47 @@ class HeavyHexSurfaceCode:
             qc.measure(self.q(anc), cr_syn[syn_bit])
             syn_bit += 1
         return syn_bit
+
+    def get_syndrome_indices(self) -> dict:
+        """
+        실험 파이프라인(SyndromeExtractor, StimFormatConverter)과 호환되는
+        syndrome 메타데이터를 반환합니다.
+
+        depth7 회로 특성:
+          - 단일 'syn' 레지스터 (per-round 레지스터 없음)
+          - 8 * num_cycles + 2 syndrome bits
+          - per-cycle 8 bits = [Z1, X1, Xb_right, Zb_top, Z2, X2, Xb_left, Zb_bot]
+          - No ancilla reset → temporal differencing 필요
+        """
+        return {
+            "num_data": self.num_data,
+            "num_stabilizers": self.num_stabilizers,
+            "num_rounds": self.num_cycles,
+            # Stim data qubit index 기준 (0-8)
+            "logical_z": [0, 3, 6],
+            "logical_x": [0, 1, 2],
+            # HW가 측정하는 연산자 (non-commuting 포함)
+            "x_stabilizers": [[0, 1, 3, 4], [4, 5, 7, 8], [3, 6], [2, 5]],
+            "z_stabilizers": [[1, 2, 4, 5], [3, 4, 6, 7], [0, 1], [7, 8]],
+            # depth7 전용 메타데이터
+            "depth7": True,
+            "no_reset": True,
+            "hw_syn_per_cycle": self._hw_syn_per_cycle,
+            "hw_syn_total": self._hw_syn_total,
+        }
+
+    def get_circuit_summary(self) -> str:
+        return (
+            f"=== Heavy-Hex Surface Code (Depth-7, Vezvaee) ===\n"
+            f"Distance: {self.distance}\n"
+            f"QEC Cycles: {self.num_cycles}\n"
+            f"DD: {self.dd}\n"
+            f"Data qubits: {DATA_QUBITS}\n"
+            f"Physical qubits: {len(self._phys)}\n"
+            f"Syndrome bits per cycle: {self._hw_syn_per_cycle}\n"
+            f"Total syndrome bits: {self._hw_syn_total}\n"
+            f"No ancilla reset: True\n"
+        )
 
     def get_physical_qubits(self):
         return self._phys
