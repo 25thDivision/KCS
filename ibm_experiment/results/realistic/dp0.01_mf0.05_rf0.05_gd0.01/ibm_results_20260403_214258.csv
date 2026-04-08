@@ -1,0 +1,5 @@
+Model,Distance,Num_Rounds,Backend,Shots,Stim_Error_Rate,Stim_Error_Type,Weight_Noise,Logical_Error_Rate,Total_Shots,Logical_Errors,Timestamp
+No_Correction,3,3,ibm_yonsei,1000,0,N/A,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.512000,1000,512,20260403_214258
+CNN,3,3,ibm_yonsei,1000,0.005,X,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.506000,1000,506,20260403_214258
+CNN,3,3,ibm_yonsei,1000,0.01,X,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.500000,1000,500,20260403_214258
+CNN,3,3,ibm_yonsei,1000,0.05,X,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.511000,1000,511,20260403_214258

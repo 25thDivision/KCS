@@ -53,7 +53,7 @@ TEST_SAMPLES = {3: 100000, 5: 100000, 7: 100000}
 CHUNK_SIZE = 5000
 
 if ARGS.cpu == "full":
-    NUM_WORKERS = max(1, (os.cpu_count() - 8))
+    NUM_WORKERS = max(1, (os.cpu_count() - 6))
 else:
     NUM_WORKERS = max(1, (os.cpu_count() // 2) - 1)
 
@@ -64,6 +64,9 @@ def get_generator(code_type):
     elif code_type == "surface_code":
         from generators.surface_code import create_surface_code_circuit, generate_dataset
         return create_surface_code_circuit, generate_dataset
+    elif code_type == "heavyhex_surface_code":
+        from generators.heavyhex_surface_code import create_heavyhex_surface_code_circuit, generate_dataset
+        return create_heavyhex_surface_code_circuit, generate_dataset
     else:
         raise ValueError(f"Unknown code_type: {code_type}")
 
@@ -195,13 +198,19 @@ def main():
                     mapper = SurfaceCodeGraphMapper(d, d, syn["x_stabilizers"], syn["z_stabilizers"])
                 elif code_type == "color_code":
                     from common.mapper_color import ColorCodeGraphMapper
-                    x_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
-                    z_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
-                    mapper = ColorCodeGraphMapper(d, d, x_stabs, z_stabs)
+                    from generators.color_code import COLORCODE_FACES
+                    faces = COLORCODE_FACES[d]
+                    mapper = ColorCodeGraphMapper(d, d, faces, faces)
+                elif code_type == "heavyhex_surface_code":
+                    from common.mapper_surface import SurfaceCodeGraphMapper
+                    from generators.heavyhex_surface_code import HEAVYHEX_D3
+                    cfg = HEAVYHEX_D3
+                    z_stabs = [cfg["z_stabilizers"][a] for a in cfg["z_ancilla"]]
+                    x_stabs = [cfg["x_stabilizers"][a] for a in cfg["x_ancilla"]]
+                    mapper = SurfaceCodeGraphMapper(d, d, z_stabs, x_stabs)  # Z-first = 데이터 순서
                 else:
-                    circuit = create_circuit(d, d, 0.001, meas_noise=np_["meas_flip"],
-                                            reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
-                    mapper = SyndromeGraphMapper(circuit)
+                    print(f"    ❌ Unknown code type: {code_type}. Skipping.")
+                    continue
                 
                 edge_path = PATHS.stim_edge(code_type, noise, d)
                 

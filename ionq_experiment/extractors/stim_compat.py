@@ -27,6 +27,8 @@ stim_sim_dir = os.path.join(stim_dir, "simulation")
 sys.path.append(stim_dir)
 sys.path.append(stim_sim_dir)
 
+from logger import log_to_file
+
 
 class StimFormatConverter:
     """
@@ -67,7 +69,11 @@ class StimFormatConverter:
         except ImportError:
             try:
                 from simulation.generators.color_code import create_color_code_circuit
+                print("[IonQ] Stim_compat.py: Loaded create_color_code_circuit from simulation.generators.color_code")
+                log_to_file("[IonQ] Stim_compat.py: Loaded create_color_code_circuit from simulation.generators.color_code")
             except ImportError:
+                print("[IonQ] Stim_compat.py: Failed to load create_color_code_circuit from paths.")
+                log_to_file("[IonQ] Stim_compat.py: Failed to load create_color_code_circuit from paths.")
                 import stim
                 return stim.Circuit.generated(
                     "color_code:memory_xyz",
@@ -80,13 +86,15 @@ class StimFormatConverter:
 
     def _initialize_mappers(self):
         """Stim 매퍼를 초기화합니다."""
-        from common.mapper_colorcode import ColorCodeGraphMapper, ColorCodeImageMapper
+        from common.mapper_color import ColorCodeGraphMapper, ColorCodeImageMapper
 
         x_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
         z_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
         self.graph_mapper = ColorCodeGraphMapper(self.distance, self.num_rounds, x_stabs, z_stabs)
         self.image_mapper = ColorCodeImageMapper(self.distance, self.num_rounds, 6)
         self.edge_index = self.graph_mapper.get_edges()
+        
+        self.num_stim_detectors = 6 * self.num_rounds  # 18 (d=3, rounds=3)
 
         # Phase 1 학습에 사용된 엣지 파일이 있으면 우선 사용
         if self.edge_dir is not None:
@@ -173,7 +181,7 @@ class StimFormatConverter:
         if model_type == "graph":
             return (self.graph_mapper.num_nodes, 6)
         elif model_type == "image":
-            return (1, self.image_mapper.height, self.image_mapper.width)
+            return (self.num_rounds, self.image_mapper.height, self.image_mapper.width)
         else:
             raise ValueError(f"Unknown model_type: {model_type}")
 

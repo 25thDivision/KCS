@@ -103,9 +103,9 @@ class MLDecoderAdapter:
 
         if self.model_name == "CNN":
             return CNN(height=self.input_shape[1], width=self.input_shape[2],
-                       in_channels=1, num_classes=self.num_qubits)
+                       in_channels=self.input_shape[0], num_classes=self.num_qubits)
         elif self.model_name == "UNet":
-            return UNet(in_ch=1, out_ch=self.num_qubits,
+            return UNet(in_ch=self.input_shape[0], out_ch=self.num_qubits,
                         base_filters=params.get("base_filters", 32))
         elif self.model_name == "GCN":
             return GCN(num_nodes=self.input_shape[0], in_channels=self.input_shape[1],

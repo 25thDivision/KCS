@@ -1,7 +1,8 @@
 {
     "backend": {
-        "type": "simulator",
-        "backend_name": "ibm_yonsei",
+        "type": "qpu",
+        "instance": "Yonsei_internal",
+        "backend_name": "ibm_boston",
         "shots": 1000
     },
     "surface_code": {

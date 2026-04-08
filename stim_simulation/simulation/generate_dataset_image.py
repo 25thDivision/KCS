@@ -64,6 +64,9 @@ def get_generator(code_type):
     elif code_type == "surface_code":
         from generators.surface_code import create_surface_code_circuit, generate_dataset
         return create_surface_code_circuit, generate_dataset
+    elif code_type == "heavyhex_surface_code":
+        from generators.heavyhex_surface_code import create_heavyhex_surface_code_circuit, generate_dataset
+        return create_heavyhex_surface_code_circuit, generate_dataset
     else:
         raise ValueError(f"Unknown code_type: {code_type}")
 
@@ -188,14 +191,22 @@ def main():
                 
                 if code_type == "surface_code":
                     from common.mapper_surface import SurfaceCodeImageMapper
-                    mapper = SurfaceCodeImageMapper(d, d, 8)  # num_stabilizers
+                    from ibm_experiment.circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
+                    sc = SurfaceCodeCircuit(distance=d, num_rounds=d)
+                    syn = sc.get_syndrome_indices()
+                    mapper = SurfaceCodeImageMapper(d, d, syn["num_stabilizers"])
                 elif code_type == "color_code":
                     from common.mapper_color import ColorCodeImageMapper
-                    mapper = ColorCodeImageMapper(d, d, 6)
+                    from generators.color_code import COLORCODE_FACES
+                    num_stab = len(COLORCODE_FACES[d]) * 2
+                    mapper = ColorCodeImageMapper(d, d, num_stab)
+                elif code_type == "heavyhex_surface_code":
+                    from common.mapper_surface import SurfaceCodeImageMapper
+                    from generators.heavyhex_surface_code import HEAVYHEX_D3
+                    mapper = SurfaceCodeImageMapper(d, d, HEAVYHEX_D3["num_ancilla"])
                 else:
-                    circuit = create_circuit(d, d, 0.001, meas_noise=np_["meas_flip"],
-                             reset_noise=np_["reset_flip"], gate_noise=np_["gate_depol"])
-                    mapper = SyndromeGraphMapper(circuit)
+                    print(f"    ❌ Unknown code type: {code_type}. Skipping.")
+                    continue
                 
                 for p in NOISE_RATES:
                     for err_type in ERROR_TYPES:

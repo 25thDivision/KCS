@@ -20,7 +20,7 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(current_dir)
 sys.path.append(root_dir)
 
-from circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
+from circuits.heavyhex_surface_code import HeavyHexSurfaceCode as SurfaceCodeCircuit
 from simulators.ibm_simulator import IBMSimulator
 from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
@@ -38,7 +38,7 @@ def parse_args():
     return parser.parse_args()
 
 ARGS = parse_args()
-PATHS = ProjectPaths(root_dir)
+PATHS = ProjectPaths(root_dir)  
 
 def load_config():
     config_path = os.path.join(current_dir, "config.json")
@@ -81,6 +81,7 @@ def save_results(results: list):
     output_dir = os.path.join(PATHS.experiment_result_dir("ibm"), results[0]["weight_noise"])
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(output_dir, f"ibm_results_{timestamp}.csv")
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
     headers = ["Model", "Distance", "Num_Rounds", "Backend", "Shots",
                "Stim_Error_Rate", "Stim_Error_Type", "Weight_Noise",
                "Logical_Error_Rate", "Total_Shots", "Logical_Errors", "Timestamp"]
@@ -122,6 +123,7 @@ def run_pipeline(config: dict):
         print(f"\n>>> [Step 2] Running on IBM backend...")
         runner = IBMSimulator(
             backend_type=backend_cfg["type"],
+            backend_instance=backend_cfg["instance"],
             backend_name=backend_cfg["backend_name"]
         )
         counts = runner.run(qc, shots=backend_cfg["shots"])

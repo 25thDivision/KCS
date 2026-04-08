@@ -79,6 +79,7 @@ def save_results(results: list):
     output_dir = os.path.join(PATHS.experiment_result_dir("ionq"), results[0]["weight_noise"])
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(output_dir, f"ionq_results_{timestamp}.csv")
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
     headers = ["Model", "Distance", "Num_Rounds", "Noise_Model", "Shots",
            "Stim_Error_Rate", "Stim_Error_Type", "Weight_Noise",
            "Logical_Error_Rate", "Total_Shots", "Logical_Errors", "Timestamp"]

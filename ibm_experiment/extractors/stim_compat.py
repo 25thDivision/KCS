@@ -150,6 +150,6 @@ class StimFormatConverter:
         if model_type == "graph":
             return (self.graph_mapper.num_nodes, 6)
         elif model_type == "image":
-            return (1, self.image_mapper.height, self.image_mapper.width)
+            return (self.num_rounds, self.image_mapper.height, self.image_mapper.width)
         else:
             raise ValueError(f"Unknown model_type: {model_type}")

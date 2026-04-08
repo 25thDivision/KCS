@@ -33,8 +33,9 @@ class IBMSimulator:
         backend_name: IBM 백엔드 이름 (예: "ibm_yonsei")
     """
 
-    def __init__(self, backend_type: str = "simulator", backend_name: str = "ibm_yonsei"):
+    def __init__(self, backend_type: str = "simulator", backend_instance: str = "Yonsei_internal", backend_name: str = "ibm_yonsei"):
         self.backend_type = backend_type
+        self.backend_instance = backend_instance
         self.backend_name = backend_name
         self.backend = None
         self.service = None
@@ -49,7 +50,7 @@ class IBMSimulator:
             self.backend = AerSimulator()
             print(f"[IBMSimulator] Backend: AerSimulator (no noise, pipeline test)")
 
-        elif self.backend_type == "qpu":
+        elif self.backend_type == "qpu" or self.backend_type == "QPU":
             from qiskit_ibm_runtime import QiskitRuntimeService
             api_key = keys.get("ibm_api_key", "")
             crn = keys.get("ibm_crn", "")
@@ -57,7 +58,7 @@ class IBMSimulator:
             if not api_key:
                 raise ValueError("ibm_api_key not found in keys.json")
 
-            self.service = QiskitRuntimeService(token=api_key, instance=crn)
+            self.service = QiskitRuntimeService(token=api_key, instance=self.backend_instance)
             self.backend = self.service.backend(self.backend_name)
             print(f"[IBMSimulator] Backend: QPU ({self.backend_name}, {self.backend.num_qubits} qubits)")
 
@@ -100,7 +101,7 @@ class IBMSimulator:
         elif self.backend_type == "qpu":
             from qiskit_ibm_runtime import SamplerV2 as Sampler
 
-            transpiled = transpile(circuit, backend=self.backend, optimization_level=3)
+            transpiled = transpile(circuit, backend=self.backend, optimization_level=1)
             print(f"[IBMSimulator] Submitting (shots={shots}, qubits={transpiled.num_qubits}, "
                 f"depth={transpiled.depth()})")
 

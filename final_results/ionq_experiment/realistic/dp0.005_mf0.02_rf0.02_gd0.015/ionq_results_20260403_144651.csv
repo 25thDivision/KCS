@@ -1,0 +1,5 @@
+Model,Distance,Num_Rounds,Noise_Model,Shots,Stim_Error_Rate,Stim_Error_Type,Weight_Noise,Logical_Error_Rate,Total_Shots,Logical_Errors,Timestamp
+No_Correction,3,3,forte-1,1000,0,N/A,realistic/dp0.005_mf0.02_rf0.02_gd0.015,0.198000,1000,198,20260403_144651
+CNN,3,3,forte-1,1000,0.005,X,realistic/dp0.005_mf0.02_rf0.02_gd0.015,0.223000,1000,223,20260403_144651
+CNN,3,3,forte-1,1000,0.01,X,realistic/dp0.005_mf0.02_rf0.02_gd0.015,0.211000,1000,211,20260403_144651
+CNN,3,3,forte-1,1000,0.05,X,realistic/dp0.005_mf0.02_rf0.02_gd0.015,0.200000,1000,200,20260403_144651

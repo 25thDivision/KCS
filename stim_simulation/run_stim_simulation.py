@@ -135,9 +135,9 @@ def load_data(filepath):
 def get_model_instance(model_name, config, input_shape, num_qubits):
     params = config["params"]
     if model_name == "CNN":
-        return CNN(height=input_shape[1], width=input_shape[2], in_channels=1, num_classes=num_qubits)
+        return CNN(height=input_shape[1], width=input_shape[2], in_channels=input_shape[0], num_classes=num_qubits)
     elif model_name == "UNet":
-        return UNet(in_ch=1, out_ch=num_qubits, base_filters=params.get("base_filters", 32))
+        return UNet(in_ch=input_shape[0], out_ch=num_qubits, base_filters=params.get("base_filters", 32))
     elif model_name == "GCN":
         return GCN(num_nodes=input_shape[0], in_channels=input_shape[1], num_qubits=num_qubits,
                    hidden_dim=params["hidden_dim"], num_layers=params["num_layers"])
