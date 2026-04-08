@@ -5,7 +5,7 @@
         "shots": 1000
     },
     "color_code": {
-        "distances": [3],
+        "distances": [3, 5],
         "num_rounds_per_distance": {
             "3": 3,
             "5": 5,

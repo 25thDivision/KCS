@@ -87,14 +87,18 @@ class StimFormatConverter:
     def _initialize_mappers(self):
         """Stim 매퍼를 초기화합니다."""
         from common.mapper_color import ColorCodeGraphMapper, ColorCodeImageMapper
+        from generators.color_code import COLORCODE_FACES
 
-        x_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
-        z_stabs = [[0,1,2,3], [1,2,4,5], [2,3,5,6]]
+        faces = COLORCODE_FACES[self.distance]
+        x_stabs = faces  # Color code: X/Z stabilizer가 동일한 support
+        z_stabs = faces
+        num_stab = len(faces) * 2  # X-type + Z-type
+
         self.graph_mapper = ColorCodeGraphMapper(self.distance, self.num_rounds, x_stabs, z_stabs)
-        self.image_mapper = ColorCodeImageMapper(self.distance, self.num_rounds, 6)
+        self.image_mapper = ColorCodeImageMapper(self.distance, self.num_rounds, num_stab)
         self.edge_index = self.graph_mapper.get_edges()
-        
-        self.num_stim_detectors = 6 * self.num_rounds  # 18 (d=3, rounds=3)
+
+        self.num_stim_detectors = num_stab * self.num_rounds
 
         # Phase 1 학습에 사용된 엣지 파일이 있으면 우선 사용
         if self.edge_dir is not None:
