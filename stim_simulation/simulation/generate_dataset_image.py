@@ -22,7 +22,7 @@ ROOT_DIR = os.path.dirname(PARENT_DIR)
 sys.path.append(CURRENT_DIR)
 sys.path.append(ROOT_DIR)
 
-from common.mapper_image import SyndromeImageMapper
+from legacy.mapper_image import SyndromeImageMapper
 from logger import log_to_file
 from paths import ProjectPaths
 

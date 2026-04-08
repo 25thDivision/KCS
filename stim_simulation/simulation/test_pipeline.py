@@ -11,8 +11,8 @@ sys.path.append(os.path.join(current_dir, '../')) # models 폴더용
 
 # [수정] 바뀐 경로 Import
 from generators.color_code import create_color_code_circuit, generate_dataset
-from common.mapper_image import SyndromeImageMapper
-from common.mapper_graph import SyndromeGraphMapper
+from legacy.mapper_image import SyndromeImageMapper
+from legacy.mapper_graph import SyndromeGraphMapper
 
 # ==============================================================================
 # Configuration Parameters

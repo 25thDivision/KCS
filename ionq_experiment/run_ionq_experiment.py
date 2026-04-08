@@ -151,7 +151,7 @@ def run_pipeline(config: dict):
 
         send_discord_alert("No_Correction", distance, 0, "N/A",
                         nc_ler, nc_result["total_shots"], backend_cfg["noise_model"], noise)
-        
+
         results.append({
             "model_name": "No_Correction", "distance": distance,
             "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
@@ -161,6 +161,32 @@ def run_pipeline(config: dict):
             "total_shots": nc_result["total_shots"],
             "logical_errors": nc_result["logical_errors"],
         })
+
+        # MWPM Baseline
+        try:
+            from decoders.mwpm_colorcode_decoder import MWPMColorCodeDecoder
+            mwpm = MWPMColorCodeDecoder(distance=distance)
+            mwpm_corrections = mwpm.decode(syndromes, data_states)
+            mwpm_eval = evaluator.evaluate(data_states, mwpm_corrections, shot_counts)
+            mwpm_ler = mwpm_eval["logical_error_rate"]
+            print(f"\n📊 MWPM (Restriction): LER={mwpm_ler:.4f} "
+                  f"({mwpm_eval['logical_errors']}/{mwpm_eval['total_shots']})")
+
+            send_discord_alert("MWPM_Restriction", distance, 0, "N/A",
+                            mwpm_ler, mwpm_eval["total_shots"], backend_cfg["noise_model"], noise)
+
+            results.append({
+                "model_name": "MWPM_Restriction", "distance": distance,
+                "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
+                "shots": backend_cfg["shots"], "stim_error_rate": 0,
+                "stim_error_type": "N/A", "weight_noise": noise,
+                "logical_error_rate": mwpm_ler,
+                "total_shots": mwpm_eval["total_shots"],
+                "logical_errors": mwpm_eval["logical_errors"],
+            })
+        except Exception as e:
+            print(f"\n    ⚠️ MWPM Restriction decoder failed: {e}")
+            log_to_file(f"IonQ | MWPM_Restriction | d={distance} | FAILED: {e}")
 
         for model_name in top_models:
             model_type = eval_cfg["model_type_map"].get(model_name, "graph")
