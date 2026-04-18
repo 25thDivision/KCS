@@ -99,7 +99,7 @@ def send_discord_alert(decoder_name, distance, ler, total_shots, noise_model, no
 # === Result Saving ===
 def save_results(results: list, noise_profile: str):
     """결과를 CSV로 저장합니다."""
-    output_dir = os.path.join(PATHS.experiment_result_dir("ionq"), noise_profile)
+    output_dir = PATHS.experiment_result_dir("ionq")
     os.makedirs(output_dir, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -23,9 +23,27 @@ import numpy as np
 
 
 class SurfaceCodeCircuit:
-    def __init__(self, distance: int, num_rounds: int = 1):
+    def __init__(self, distance: int, num_rounds: int = 1,
+                 physical_qubits: dict = None):
+        """
+        Rotated surface code QEC memory circuit.
+
+        Args:
+            distance: code distance (3, 5, 7)
+            num_rounds: number of QEC rounds
+            physical_qubits: optional dict {logical_idx -> physical_idx}.
+                Keys 0..d^2-1 map data qubits; keys d^2..d^2+num_stab-1 map
+                ancilla (X stabs then Z stabs, matching x_stabilizers +
+                z_stabilizers). When provided, the circuit uses a single
+                ancilla register with reset between rounds (ancilla reuse),
+                so the physical layout only needs d^2 + num_stab qubits
+                rather than d^2 + num_stab * num_rounds.
+                When None, legacy per-round ancilla allocation is used.
+        """
         self.distance = distance
         self.num_rounds = num_rounds
+        self.physical_qubits = physical_qubits
+        self.reuse_ancilla = physical_qubits is not None
 
         self.num_data = distance ** 2
         self.x_stabilizers, self.z_stabilizers = self._generate_stabilizers()
@@ -34,6 +52,15 @@ class SurfaceCodeCircuit:
         # Logical operators
         self.logical_x = list(range(distance))  # top row
         self.logical_z = list(range(0, distance ** 2, distance))  # left column
+
+        if physical_qubits is not None:
+            expected = self.num_data + self.num_stabilizers
+            if len(physical_qubits) != expected:
+                raise ValueError(
+                    f"physical_qubits must have {expected} entries "
+                    f"({self.num_data} data + {self.num_stabilizers} ancilla), "
+                    f"got {len(physical_qubits)}."
+                )
 
     def _generate_stabilizers(self):
         """Distance에 따른 stabilizer를 자동 생성합니다."""
@@ -82,9 +109,12 @@ class SurfaceCodeCircuit:
         Returns:
             Qiskit QuantumCircuit
         """
-        d = self.distance
+        if self.reuse_ancilla:
+            return self._build_reuse_circuit(initial_state)
+        return self._build_legacy_circuit(initial_state)
+
+    def _build_legacy_circuit(self, initial_state: int) -> QuantumCircuit:
         num_stab = self.num_stabilizers
-        num_anc_total = num_stab * self.num_rounds
 
         data = QuantumRegister(self.num_data, "data")
         ancilla_regs = []
@@ -100,20 +130,17 @@ class SurfaceCodeCircuit:
 
         qc = QuantumCircuit(data, *ancilla_regs, *syndrome_cregs, data_creg)
 
-        # Encoding: |0⟩_L = |00...0⟩ (computational basis state)
         if initial_state == 1:
             for q in self.logical_x:
                 qc.x(data[q])
 
         qc.barrier()
 
-        # QEC Rounds
         for r in range(self.num_rounds):
             anc = ancilla_regs[r]
             syn = syndrome_cregs[r]
             anc_idx = 0
 
-            # X-type stabilizers: H → CNOT(anc, data) → H → measure
             for stab_qubits in self.x_stabilizers:
                 qc.h(anc[anc_idx])
                 for dq in stab_qubits:
@@ -122,7 +149,6 @@ class SurfaceCodeCircuit:
                 qc.measure(anc[anc_idx], syn[anc_idx])
                 anc_idx += 1
 
-            # Z-type stabilizers: CNOT(data, anc) → measure
             for stab_qubits in self.z_stabilizers:
                 for dq in stab_qubits:
                     qc.cx(data[dq], anc[anc_idx])
@@ -131,11 +157,74 @@ class SurfaceCodeCircuit:
 
             qc.barrier()
 
-        # Final data measurement
         for i in range(self.num_data):
             qc.measure(data[i], data_creg[i])
 
         return qc
+
+    def _build_reuse_circuit(self, initial_state: int) -> QuantumCircuit:
+        """Single ancilla register, reset between rounds for hardware mapping."""
+        num_stab = self.num_stabilizers
+
+        data = QuantumRegister(self.num_data, "data")
+        anc = QuantumRegister(num_stab, "anc")
+        syndrome_cregs = [
+            ClassicalRegister(num_stab, f"syn_r{r}")
+            for r in range(self.num_rounds)
+        ]
+        data_creg = ClassicalRegister(self.num_data, "data_meas")
+
+        qc = QuantumCircuit(data, anc, *syndrome_cregs, data_creg)
+
+        if initial_state == 1:
+            for q in self.logical_x:
+                qc.x(data[q])
+
+        qc.barrier()
+
+        for r in range(self.num_rounds):
+            syn = syndrome_cregs[r]
+
+            if r > 0:
+                for i in range(num_stab):
+                    qc.reset(anc[i])
+
+            anc_idx = 0
+            for stab_qubits in self.x_stabilizers:
+                qc.h(anc[anc_idx])
+                for dq in stab_qubits:
+                    qc.cx(anc[anc_idx], data[dq])
+                qc.h(anc[anc_idx])
+                qc.measure(anc[anc_idx], syn[anc_idx])
+                anc_idx += 1
+
+            for stab_qubits in self.z_stabilizers:
+                for dq in stab_qubits:
+                    qc.cx(data[dq], anc[anc_idx])
+                qc.measure(anc[anc_idx], syn[anc_idx])
+                anc_idx += 1
+
+            qc.barrier()
+
+        for i in range(self.num_data):
+            qc.measure(data[i], data_creg[i])
+
+        return qc
+
+    def get_initial_layout(self) -> list:
+        """
+        Physical qubit list indexed by virtual-circuit position, for passing
+        as `initial_layout=` to `qiskit.transpile`. Requires physical_qubits
+        to have been provided at construction.
+        """
+        if self.physical_qubits is None:
+            raise ValueError("physical_qubits was not provided at construction.")
+        layout = []
+        for i in range(self.num_data):
+            layout.append(self.physical_qubits[i])
+        for i in range(self.num_stabilizers):
+            layout.append(self.physical_qubits[self.num_data + i])
+        return layout
 
     def get_syndrome_indices(self) -> dict:
         """bitstring 파싱을 위한 인덱스 매핑을 반환합니다."""
@@ -147,6 +236,7 @@ class SurfaceCodeCircuit:
             "z_stabilizers": self.z_stabilizers,
             "logical_x": self.logical_x,
             "logical_z": self.logical_z,
+            "depth7": False,
         }
 
     def get_circuit_summary(self) -> str:

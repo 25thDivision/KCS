@@ -2,8 +2,22 @@
     "backend": {
         "type": "qpu",
         "instance": "Yonsei_internal",
-        "backend_name": "ibm_boston",
-        "shots": 1000
+        "backend_name": "ibm_miami",
+        "shots": 1000,
+        "dynamical_decoupling": true,
+        "dd_sequence": "XY4"
+    },
+    "surface_code": {
+        "distances": [3, 5],
+        "num_rounds_per_distance": {
+            "3": 3,
+            "5": 5,
+            "7": 7
+        },
+        "logical_initial_state": 0,
+        "auto_qubit_selection": true,
+        "qubit_selection_strategy": "min_cx_error",
+        "reuse_ancilla": true
     },
     "heavyhex_surface_code": {
         "distances": [3],
@@ -15,7 +29,8 @@
         "logical_initial_state": 0
     },
     "evaluation": {
-        "code_type": "heavyhex_surface_code",
+        "code_type": "surface_code",
+        "baselines": ["No_Correction", "MWPM"],
         "noise": "realistic/dp0_mf0.005_rf0.005_gd0.004",
         "top_models": ["CNN", "GCN", "GCNII", "GAT", "APPNP", "GNN", "GraphTransformer", "GraphMamba"],
         "model_type_map": {

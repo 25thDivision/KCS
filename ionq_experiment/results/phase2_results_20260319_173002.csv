@@ -1,4 +1,0 @@
-Model,Distance,Num_Rounds,Noise_Model,Shots,Stim_Error_Rate,Stim_Error_Type,Logical_Error_Rate,Total_Shots,Logical_Errors,Timestamp
-GraphMamba,3,3,forte-1,1000,0.005,X,0.199000,1000,199,20260319_173002
-GraphMamba,3,3,forte-1,1000,0.01,X,0.187000,1000,187,20260319_173002
-GraphMamba,3,3,forte-1,1000,0.05,X,0.208000,1000,208,20260319_173002

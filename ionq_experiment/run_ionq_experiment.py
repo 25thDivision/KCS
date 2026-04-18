@@ -25,6 +25,7 @@ from simulators.ionq_simulator import IonQSimulator
 from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
 from decoders.ml_decoder_adapter import MLDecoderAdapter
+from decoders.hybrid_decoder import HybridMWPMDecoder
 from evaluation.logical_error_rate import LogicalErrorRateEvaluator
 from logger import log_to_file
 from paths import ProjectPaths
@@ -33,8 +34,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="IonQ Phase 2 Experiment")
     parser.add_argument("-m", "--models", nargs="+", type=str, default=None,
                         help="실행할 모델 (미지정 시 config의 top_models)")
-    parser.add_argument("-n", "--noise", type=str, default=None,
-                        help="노이즈 프로파일 (미지정 시 config의 noise)")
+    parser.add_argument("-d", "--distance", nargs="+", type=int, default=None,
+                        help="실행할 distance (미지정 시 config의 distances)")
+    parser.add_argument("-n", "--noise", nargs="+", type=str, default=None,
+                        help="노이즈 프로파일 목록 (미지정 시 stim config의 active_noise)")
     return parser.parse_args()
 
 ARGS = parse_args()
@@ -76,7 +79,7 @@ def send_discord_alert(model_name, d, p, err_type, ler, total_shots, noise_model
         pass
 
 def save_results(results: list):
-    output_dir = os.path.join(PATHS.experiment_result_dir("ionq"), results[0]["weight_noise"])
+    output_dir = PATHS.experiment_result_dir("ionq")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(output_dir, f"ionq_results_{timestamp}.csv")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -101,18 +104,28 @@ def run_pipeline(config: dict):
 
     # CLI 모델 우선, 없으면 config
     top_models = ARGS.models if ARGS.models else eval_cfg["top_models"]
-    noise = ARGS.noise if ARGS.noise else eval_cfg["noise"]
-    
+
+    # noise 목록 결정
+    if ARGS.noise:
+        noise_list = ARGS.noise
+    else:
+        stim_config_path = os.path.join(root_dir, "stim_simulation", "config.json")
+        with open(stim_config_path) as f:
+            noise_list = json.load(f)["experiment"]["active_noise"]
+
     results = []
 
-    for distance in code_cfg["distances"]:
+    distances = ARGS.distance if ARGS.distance else code_cfg["distances"]
+    for distance in distances:
         num_rounds = code_cfg["num_rounds_per_distance"][str(distance)]
 
         print(f"\n{'='*70}")
-        print(f"  Phase 2: d={distance}, rounds={num_rounds}, noise={noise}")
+        print(f"  Phase 2: d={distance}, rounds={num_rounds}")
+        print(f"  Noise profiles: {noise_list}")
         print(f"  Models: {top_models}")
         print(f"{'='*70}")
 
+        # === HARDWARE: 1회만 실행 ===
         print(f"\n>>> [Step 1] Building Color Code Circuit...")
         cc = ColorCodeCircuit(distance=distance, num_rounds=num_rounds)
         print(cc.get_circuit_summary())
@@ -131,38 +144,35 @@ def run_pipeline(config: dict):
         extractor = SyndromeExtractor(syn_indices)
         syndromes, data_states, shot_counts = extractor.extract_from_counts(counts)
 
-        print(f"\n>>> [Step 4] Converting to Stim-compatible format...")
-        edge_dir = PATHS.stim_data_dir(code_type, noise, "graph")
-        converter = StimFormatConverter(
-            distance=distance, num_rounds=num_rounds,
-            edge_dir=edge_dir
-        )
-
         evaluator = LogicalErrorRateEvaluator(
             logical_z=syn_indices["logical_z"],
             initial_logical_state=code_cfg["logical_initial_state"]
         )
-        
-        # No Correction 측정 (동일 shot)
+
+        # === NOISE-INDEPENDENT BASELINES: 1회만 ===
+
+        # No Correction
         no_correction = np.zeros_like(data_states)
         nc_result = evaluator.evaluate(data_states, no_correction, shot_counts)
         nc_ler = nc_result["logical_error_rate"]
         print(f"\n📊 IonQ No Correction: LER={nc_ler:.4f} ({nc_result['logical_errors']}/{nc_result['total_shots']})")
 
         send_discord_alert("No_Correction", distance, 0, "N/A",
-                        nc_ler, nc_result["total_shots"], backend_cfg["noise_model"], noise)
+                        nc_ler, nc_result["total_shots"], backend_cfg["noise_model"], "N/A")
 
         results.append({
             "model_name": "No_Correction", "distance": distance,
             "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
             "shots": backend_cfg["shots"], "stim_error_rate": 0,
-            "stim_error_type": "N/A", "weight_noise": noise,
+            "stim_error_type": "N/A", "weight_noise": "N/A",
             "logical_error_rate": nc_ler,
             "total_shots": nc_result["total_shots"],
             "logical_errors": nc_result["logical_errors"],
         })
 
-        # MWPM Baseline
+        # MWPM Baseline (noise-independent)
+        mwpm_available = False
+        mwpm_corrections = None
         try:
             from decoders.mwpm_colorcode_decoder import MWPMColorCodeDecoder
             mwpm = MWPMColorCodeDecoder(distance=distance)
@@ -173,85 +183,131 @@ def run_pipeline(config: dict):
                   f"({mwpm_eval['logical_errors']}/{mwpm_eval['total_shots']})")
 
             send_discord_alert("MWPM_Restriction", distance, 0, "N/A",
-                            mwpm_ler, mwpm_eval["total_shots"], backend_cfg["noise_model"], noise)
+                            mwpm_ler, mwpm_eval["total_shots"], backend_cfg["noise_model"], "N/A")
 
             results.append({
                 "model_name": "MWPM_Restriction", "distance": distance,
                 "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
                 "shots": backend_cfg["shots"], "stim_error_rate": 0,
-                "stim_error_type": "N/A", "weight_noise": noise,
+                "stim_error_type": "N/A", "weight_noise": "N/A",
                 "logical_error_rate": mwpm_ler,
                 "total_shots": mwpm_eval["total_shots"],
                 "logical_errors": mwpm_eval["logical_errors"],
             })
+            mwpm_available = True
         except Exception as e:
             print(f"\n    ⚠️ MWPM Restriction decoder failed: {e}")
             log_to_file(f"IonQ | MWPM_Restriction | d={distance} | FAILED: {e}")
 
-        for model_name in top_models:
-            model_type = eval_cfg["model_type_map"].get(model_name, "graph")
+        # === NOISE-DEPENDENT: noise별 반복 ===
+        for noise in noise_list:
+            print(f"\n>>> [Step 4] Noise profile: {noise}")
 
-            for p in eval_cfg["stim_error_rates"]:
-                for err_type in eval_cfg["stim_error_types"]:
-                    weight_path = PATHS.stim_weight(code_type, noise, model_name, distance, p, err_type)
+            edge_dir = PATHS.stim_data_dir(code_type, noise, "graph")
+            converter = StimFormatConverter(
+                distance=distance, num_rounds=num_rounds,
+                edge_dir=edge_dir
+            )
 
-                    if not os.path.exists(weight_path):
-                        print(f"\n    ⚠️ Weight not found: {weight_path}. Skipping.")
-                        continue
+            for model_name in top_models:
+                model_type = eval_cfg["model_type_map"].get(model_name, "graph")
 
-                    print(f"\n    >>> {model_name} (trained: d={distance}, p={p}, {err_type})")
+                for p in eval_cfg["stim_error_rates"]:
+                    for err_type in eval_cfg["stim_error_types"]:
+                        weight_path = PATHS.stim_weight(code_type, noise, model_name, distance, p, err_type)
 
-                    try:
-                        if model_type == "graph":
-                            model_input_shape = converter.get_model_input_shape("graph")
-                            model_input, edge_index = converter.to_graph_format(syndromes)
-                            print(f"        Input shape: {model_input.shape} (graph)")
-                        else:
-                            model_input_shape = converter.get_model_input_shape("image")
-                            model_input = converter.to_image_format(syndromes)
-                            edge_index = None
-                            print(f"        Input shape: {model_input.shape} (image)")
-                    except Exception as e:
-                        print(f"    ❌ Format conversion failed: {e}")
-                        log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED format: {e}")
-                        continue
+                        if not os.path.exists(weight_path):
+                            print(f"\n    ⚠️ Weight not found: {weight_path}. Skipping.")
+                            continue
 
+                        print(f"\n    >>> {model_name} (trained: d={distance}, p={p}, {err_type}, noise={noise})")
 
-                    try:
-                        decoder = MLDecoderAdapter(
-                            model_name=model_name, weight_path=weight_path,
-                            model_type=model_type, distance=distance,
-                            input_shape=model_input_shape,
-                        )
-                    except Exception as e:
-                        print(f"    ❌ Model load failed: {e}")
-                        log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED model load: {e}")
-                        continue
+                        try:
+                            if model_type == "graph":
+                                model_input_shape = converter.get_model_input_shape("graph")
+                                model_input, edge_index = converter.to_graph_format(syndromes)
+                                print(f"        Input shape: {model_input.shape} (graph)")
+                            else:
+                                model_input_shape = converter.get_model_input_shape("image")
+                                model_input = converter.to_image_format(syndromes)
+                                edge_index = None
+                                print(f"        Input shape: {model_input.shape} (image)")
+                        except Exception as e:
+                            print(f"    ❌ Format conversion failed: {e}")
+                            log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED format: {e}")
+                            continue
 
-                    try:
-                        corrections = decoder.decode(model_input, edge_index=edge_index)
-                        print(f"        Corrections shape: {corrections.shape}")
-                    except Exception as e:
-                        print(f"    ❌ Inference failed: {e}")
-                        log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED inference: {e}")
-                        continue
+                        try:
+                            decoder = MLDecoderAdapter(
+                                model_name=model_name, weight_path=weight_path,
+                                model_type=model_type, distance=distance,
+                                input_shape=model_input_shape,
+                            )
+                        except Exception as e:
+                            print(f"    ❌ Model load failed: {e}")
+                            log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED model load: {e}")
+                            continue
 
-                    eval_result = evaluator.evaluate(data_states, corrections, shot_counts)
-                    ler = eval_result["logical_error_rate"]
-                    print(f"        ✅ Logical Error Rate: {ler:.4f} "
-                          f"({eval_result['logical_errors']}/{eval_result['total_shots']})")
+                        try:
+                            corrections = decoder.decode(model_input, edge_index=edge_index)
+                            print(f"        Corrections shape: {corrections.shape}")
+                        except Exception as e:
+                            print(f"    ❌ Inference failed: {e}")
+                            log_to_file(f"IonQ | {model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED inference: {e}")
+                            continue
 
-                    send_discord_alert(model_name, distance, p, err_type,
-                                       ler, eval_result["total_shots"], backend_cfg["noise_model"], noise)
+                        eval_result = evaluator.evaluate(data_states, corrections, shot_counts)
+                        ler = eval_result["logical_error_rate"]
+                        print(f"        ✅ Logical Error Rate: {ler:.4f} "
+                              f"({eval_result['logical_errors']}/{eval_result['total_shots']})")
 
-                    results.append({
-                        "model_name": model_name, "distance": distance,
-                        "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
-                        "shots": backend_cfg["shots"], "stim_error_rate": p,
-                        "stim_error_type": err_type, "weight_noise": noise, "logical_error_rate": ler,
-                        "total_shots": eval_result["total_shots"],
-                        "logical_errors": eval_result["logical_errors"],
-                    })
+                        send_discord_alert(model_name, distance, p, err_type,
+                                           ler, eval_result["total_shots"], backend_cfg["noise_model"], noise)
+
+                        results.append({
+                            "model_name": model_name, "distance": distance,
+                            "num_rounds": num_rounds, "noise_model": backend_cfg["noise_model"],
+                            "shots": backend_cfg["shots"], "stim_error_rate": p,
+                            "stim_error_type": err_type, "weight_noise": noise, "logical_error_rate": ler,
+                            "total_shots": eval_result["total_shots"],
+                            "logical_errors": eval_result["logical_errors"],
+                        })
+
+                        # Hybrid MWPM+ML (MWPM base는 위에서 캐싱, ML residual만 noise-dependent)
+                        if mwpm_available:
+                            try:
+                                hybrid = HybridMWPMDecoder(
+                                    distance=distance,
+                                    ml_decoder=decoder,
+                                    converter=converter,
+                                    model_type=model_type,
+                                )
+                                hybrid_corrections = hybrid.decode(syndromes, data_states)
+                                hybrid_eval = evaluator.evaluate(data_states, hybrid_corrections, shot_counts)
+                                hybrid_ler = hybrid_eval["logical_error_rate"]
+                                print(f"        ✅ Hybrid MWPM+{model_name}: LER={hybrid_ler:.4f} "
+                                      f"({hybrid_eval['logical_errors']}/{hybrid_eval['total_shots']})")
+
+                                results.append({
+                                    "model_name": f"MWPM+{model_name}",
+                                    "distance": distance,
+                                    "num_rounds": num_rounds,
+                                    "noise_model": backend_cfg["noise_model"],
+                                    "shots": backend_cfg["shots"],
+                                    "stim_error_rate": p,
+                                    "stim_error_type": err_type,
+                                    "weight_noise": noise,
+                                    "logical_error_rate": hybrid_ler,
+                                    "total_shots": hybrid_eval["total_shots"],
+                                    "logical_errors": hybrid_eval["logical_errors"],
+                                })
+
+                                send_discord_alert(f"MWPM+{model_name}", distance, p, err_type,
+                                                  hybrid_ler, hybrid_eval["total_shots"],
+                                                  backend_cfg["noise_model"], noise)
+                            except Exception as e:
+                                print(f"        ⚠️ Hybrid MWPM+{model_name} failed: {e}")
+                                log_to_file(f"IonQ | MWPM+{model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED: {e}")
 
     return results
 

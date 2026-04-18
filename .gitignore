@@ -20,3 +20,7 @@ keys.json
 
 # 로그 파일 무시
 *.log
+*.out
+
+# 레거시 무시
+legacy/

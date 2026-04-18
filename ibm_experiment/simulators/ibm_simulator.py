@@ -81,13 +81,57 @@ class IBMSimulator:
         print(f"    [Warning] No FakeBackend for '{self.backend_name}'. Using FakeSherbrooke.")
         return FakeSherbrooke()
 
-    def run(self, circuit: QuantumCircuit, shots: int = 1000) -> dict:
+    def transpile_circuit(self, circuit: QuantumCircuit,
+                          initial_layout=None,
+                          dd_sequence: str = None,
+                          optimization_level: int = 1) -> QuantumCircuit:
+        """
+        Transpile `circuit` to `self.backend`, optionally pinning the layout
+        and appending a `PadDynamicalDecoupling` scheduling pass.
+        """
+        transpiled = transpile(
+            circuit, backend=self.backend,
+            initial_layout=initial_layout,
+            optimization_level=optimization_level,
+        )
+        if dd_sequence:
+            from qiskit.transpiler import PassManager
+            from qiskit.transpiler.passes import (
+                ALAPScheduleAnalysis, PadDynamicalDecoupling,
+            )
+            from qiskit.circuit.library import XGate, YGate
+            seqs = {
+                "XY4": [XGate(), YGate(), XGate(), YGate()],
+                "XY8": [XGate(), YGate(), XGate(), YGate(),
+                        YGate(), XGate(), YGate(), XGate()],
+                "XX":  [XGate(), XGate()],
+            }
+            if dd_sequence not in seqs:
+                raise ValueError(f"Unknown DD sequence: {dd_sequence}")
+            pm = PassManager([
+                ALAPScheduleAnalysis(target=self.backend.target),
+                PadDynamicalDecoupling(
+                    target=self.backend.target,
+                    dd_sequence=seqs[dd_sequence],
+                    pulse_alignment=1,
+                    skip_reset_qubits=True,
+                ),
+            ])
+            transpiled = pm.run(transpiled)
+        return transpiled
+
+    def run(self, circuit: QuantumCircuit, shots: int = 1000,
+            initial_layout=None, dd_sequence: str = None,
+            optimization_level: int = 1) -> dict:
         """
         회로를 IBM 백엔드에 제출하고 결과를 반환합니다.
 
         Args:
             circuit: 실행할 Qiskit 회로
             shots: 실행 횟수
+            initial_layout: transpile 시 virtual->physical qubit layout
+            dd_sequence: "XY4", "XY8", "XX" 또는 None
+            optimization_level: transpile 최적화 레벨
 
         Returns:
             dict: {bitstring: count}
@@ -101,7 +145,12 @@ class IBMSimulator:
         elif self.backend_type == "qpu":
             from qiskit_ibm_runtime import SamplerV2 as Sampler
 
-            transpiled = transpile(circuit, backend=self.backend, optimization_level=1)
+            transpiled = self.transpile_circuit(
+                circuit,
+                initial_layout=initial_layout,
+                dd_sequence=dd_sequence,
+                optimization_level=optimization_level,
+            )
             print(f"[IBMSimulator] Submitting (shots={shots}, qubits={transpiled.num_qubits}, "
                 f"depth={transpiled.depth()})")
 

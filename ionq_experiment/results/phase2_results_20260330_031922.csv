@@ -1,6 +1,0 @@
-Model,Distance,Num_Rounds,Noise_Model,Shots,Stim_Error_Rate,Stim_Error_Type,Weight_Noise,Logical_Error_Rate,Total_Shots,Logical_Errors,Timestamp
-No_Correction,3,3,forte-1,1000,0,N/A,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.179000,1000,179,20260330_031922
-GraphMamba,3,3,forte-1,1000,0.01,X,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.179000,1000,179,20260330_031922
-GraphMamba,3,3,forte-1,1000,0.05,X,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.185000,1000,185,20260330_031922
-GraphTransformer,3,3,forte-1,1000,0.01,X,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.179000,1000,179,20260330_031922
-GraphTransformer,3,3,forte-1,1000,0.05,X,realistic/dp0.01_mf0.05_rf0.05_gd0.01,0.184000,1000,184,20260330_031922

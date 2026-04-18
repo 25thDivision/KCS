@@ -1,26 +1,29 @@
 """
-IBM Heavy-Hex Surface Code 신드롬 → Stim 호환 형태 변환기
+IBM 신드롬 → Stim 호환 형태 변환기
 
-heavyhex_surface_code_depth7 회로에서 나온 HW syndrome을
-Phase 1 ML 모델이 기대하는 입력 형태로 변환합니다.
+코드 타입별 변환 경로:
+  - heavyhex_surface_code (legacy): depth7 heavy-hex syndrome은 HW가 측정하는
+    연산자가 Stim의 TRUE stabilizer와 일치하지 않아 `reorder_hw_to_stim()`으로
+    Z-stab만 매핑하고 X-stab은 0으로 마스킹한다.
+  - surface_code: rotated surface code의 Qiskit 회로는 Stim의 기본
+    `rotated_memory_z`와 stabilizer 지지대(support)가 맞지 않는다 (X↔Z label
+    swap, logical observable 방향이 다름). 따라서 우리 Qiskit 회로와 정확히
+    동일한 measurement schedule을 가진 Stim 참조 회로를 직접 구성하고,
+    `compile_m2d_converter()`로 HW measurement → detector 변환을 수행한다.
+    (Round 0에서는 Z-stab detector만 존재하고, round r≥1은 이전 round와의
+    XOR, 최종은 data 측정에서 재구성한 Z-stab과 마지막 syndrome의 XOR.)
 
-핵심 변환:
-  1. Temporal differencing (no-reset XOR tracking)
-  2. HW syndrome 순서 → Stim TRUE stabilizer 순서 재배열
-     (Z stab만 매핑, X stab은 0 마스킹 → reorder_hw_to_stim())
+공통 처리:
+  1. ML 경로용: temporal differencing된 detector array (기존 포맷)
+  2. MWPM 경로용: Stim compile_m2d_converter 결과 (surface_code only)
   3. SurfaceCodeGraphMapper / SurfaceCodeImageMapper로 ML 입력 생성
-
-HW per-cycle 8 bits:
-  [Z1, X1, Xb_right, Zb_top, Z2, X2, Xb_left, Zb_bot]
-
-Stim per-round 8 bits:
-  [Z{0134}, Z{1245}, Z{01}, Z{78}, X{0126}, X{2346}, X{25}, X{78}]
+  4. Phase 1에서 저장한 edges_dK.npy가 있으면 로드
 """
 
 import os
 import sys
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, List, Optional, Dict
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 ibm_dir = os.path.dirname(current_dir)
@@ -30,70 +33,252 @@ stim_sim_dir = os.path.join(stim_dir, "simulation")
 
 sys.path.append(stim_dir)
 sys.path.append(stim_sim_dir)
+sys.path.append(ibm_dir)
+
+
+# ---------------------------------------------------------------------------
+# Stim reference circuit matching the Qiskit SurfaceCodeCircuit schedule.
+# ---------------------------------------------------------------------------
+def build_qiskit_style_stim_circuit(
+    distance: int,
+    num_rounds: int,
+    x_stabilizers: List[List[int]],
+    z_stabilizers: List[List[int]],
+    logical_z_qubits: List[int],
+    noise: Optional[Dict[str, float]] = None,
+):
+    """
+    Build a stim.Circuit that mirrors the Qiskit SurfaceCodeCircuit memory-Z
+    schedule so that detectors / observable match our Qiskit stabilizer set.
+
+    Measurement order (per round): X-stabs then Z-stabs; final data M at end.
+    Initial state: |0⟩_L (data and ancilla reset in Z basis).
+
+    Qubit index layout:
+        data qubits: 0 .. d²-1
+        X ancillas:  d² .. d² + n_x - 1
+        Z ancillas:  d² + n_x .. d² + n_x + n_z - 1
+    """
+    import stim
+
+    d = distance
+    num_data = d * d
+    n_x = len(x_stabilizers)
+    n_z = len(z_stabilizers)
+    n_stab = n_x + n_z
+
+    x_anc = list(range(num_data, num_data + n_x))
+    z_anc = list(range(num_data + n_x, num_data + n_stab))
+    all_anc = x_anc + z_anc  # MR order
+
+    if noise is None:
+        noise = {}
+    dp = float(noise.get("dp", 0.0))
+    mf = float(noise.get("mf", 0.0))
+    rf = float(noise.get("rf", 0.0))
+    gd = float(noise.get("gd", 0.0))
+
+    c = stim.Circuit()
+
+    # Coordinates for readability only
+    for i in range(num_data):
+        r, col = divmod(i, d)
+        c.append("QUBIT_COORDS", [i], [2 * col + 1, 2 * r + 1])
+    for k, stab in enumerate(x_stabilizers):
+        xs = [2 * (q % d) + 1 for q in stab]
+        ys = [2 * (q // d) + 1 for q in stab]
+        c.append("QUBIT_COORDS", [x_anc[k]],
+                 [sum(xs) / len(xs), sum(ys) / len(ys)])
+    for k, stab in enumerate(z_stabilizers):
+        xs = [2 * (q % d) + 1 for q in stab]
+        ys = [2 * (q // d) + 1 for q in stab]
+        c.append("QUBIT_COORDS", [z_anc[k]],
+                 [sum(xs) / len(xs), sum(ys) / len(ys)])
+
+    # Initialize all qubits in |0>
+    c.append("R", list(range(num_data)) + all_anc)
+    if rf > 0:
+        c.append("X_ERROR", list(range(num_data)) + all_anc, rf)
+    c.append("TICK")
+
+    for r in range(num_rounds):
+        if dp > 0:
+            c.append("DEPOLARIZE1", list(range(num_data)), dp)
+
+        # X-stabs: H a; CX a d; H a
+        for k, stab in enumerate(x_stabilizers):
+            a = x_anc[k]
+            c.append("H", [a])
+            if gd > 0:
+                c.append("DEPOLARIZE1", [a], gd)
+            for dq in stab:
+                c.append("CX", [a, dq])
+                if gd > 0:
+                    c.append("DEPOLARIZE2", [a, dq], gd)
+            c.append("H", [a])
+            if gd > 0:
+                c.append("DEPOLARIZE1", [a], gd)
+
+        # Z-stabs: CX d a
+        for k, stab in enumerate(z_stabilizers):
+            a = z_anc[k]
+            for dq in stab:
+                c.append("CX", [dq, a])
+                if gd > 0:
+                    c.append("DEPOLARIZE2", [dq, a], gd)
+
+        if mf > 0:
+            c.append("X_ERROR", all_anc, mf)
+        c.append("MR", all_anc)
+        if rf > 0:
+            c.append("X_ERROR", all_anc, rf)
+
+        # DETECTOR lines. rec convention used below (see module docstring):
+        #   within a just-completed MR of n_stab measurements in order
+        #   [X_0, ..., X_{n_x-1}, Z_0, ..., Z_{n_z-1}], the k-th target is at
+        #   rec[-(n_stab - k)]; the same k in the previous round is at
+        #   rec[-(2*n_stab - k)].
+        if r == 0:
+            # |0>_L is not an eigenstate of X-stabs, so only Z-stabs are
+            # deterministic in round 0.
+            for zk in range(n_z):
+                sk = n_x + zk
+                c.append("DETECTOR",
+                         [stim.target_rec(-(n_stab - sk))],
+                         [sk, 0, 0])
+        else:
+            c.append("SHIFT_COORDS", [], [0, 0, 1])
+            for sk in range(n_stab):
+                cur = -(n_stab - sk)
+                prev = -(2 * n_stab - sk)
+                c.append("DETECTOR",
+                         [stim.target_rec(cur), stim.target_rec(prev)],
+                         [sk, 0, 0])
+        c.append("TICK")
+
+    # Final data measurement
+    if mf > 0:
+        c.append("X_ERROR", list(range(num_data)), mf)
+    c.append("M", list(range(num_data)))
+
+    # Reconstruct Z-stabs from data measurements and XOR with last-round Z.
+    # After final M (num_data meas), data[i] -> rec[-(num_data - i)].
+    # Last round's Z[zk] measurement -> rec[-(num_data + n_z - zk)].
+    for zk, stab in enumerate(z_stabilizers):
+        targets = []
+        for dq in stab:
+            targets.append(stim.target_rec(-(num_data - dq)))
+        targets.append(stim.target_rec(-(num_data + n_z - zk)))
+        c.append("DETECTOR", targets, [n_x + zk, 0, 1])
+
+    # Logical Z observable = XOR of data qubits along the logical-Z support.
+    obs = [stim.target_rec(-(num_data - q)) for q in logical_z_qubits]
+    c.append("OBSERVABLE_INCLUDE", obs, 0)
+
+    return c
 
 
 class StimFormatConverter:
     """
-    IBM Heavy-Hex 신드롬을 Phase 1 ML 모델 입력으로 변환합니다.
+    하드웨어 신드롬을 Phase 1 ML 모델 입력 (graph / image) 으로 변환합니다.
 
     Parameters:
-        distance: Code distance (3 only)
-        num_rounds: QEC 라운드 수 (= num_cycles)
+        distance: Code distance
+        num_rounds: QEC 라운드 수
         edge_dir: Phase 1 edge 파일 디렉토리 (stim_data_dir)
-        code_type: "heavyhex_surface_code" (기본값)
+        code_type: "heavyhex_surface_code" or "surface_code"
     """
 
     def __init__(self, distance: int, num_rounds: int,
-                 edge_dir: str = None, code_type: str = "heavyhex_surface_code"):
+                 edge_dir: str = None, code_type: str = "surface_code"):
         self.distance = distance
         self.num_rounds = num_rounds
         self.edge_dir = edge_dir
         self.code_type = code_type
 
-        # Heavyhex 설정 로드
-        from generators.heavyhex_surface_code import (
-            HEAVYHEX_D3, create_heavyhex_surface_code_circuit
-        )
-        self.cfg = HEAVYHEX_D3
-        self.num_stabilizers = self.cfg["num_ancilla"]  # 8
+        if code_type == "heavyhex_surface_code":
+            self._init_heavyhex()
+        elif code_type == "surface_code":
+            self._init_surface_code()
+        else:
+            raise ValueError(f"Unknown code_type: {code_type}")
 
-        # Stim 참조 회로 (detector 수 확인용)
-        self.stim_circuit = create_heavyhex_surface_code_circuit(
-            distance=distance, rounds=num_rounds, noise=0.001
-        )
-        self.num_stim_detectors = self.num_rounds * self.num_stabilizers
-
-        # Data qubit indices (Stim 기준: 0-8)
-        self.stim_data_qubit_indices = list(range(self.cfg["num_data"]))
-
-        # Mapper 초기화
-        self.graph_mapper = None
-        self.image_mapper = None
-        self.edge_index = None
         self._initialize_mappers()
 
-        print(f"[StimFormatConverter] Initialized for heavyhex d={distance}, rounds={num_rounds}")
+        print(f"[StimFormatConverter] Initialized for {code_type} d={distance}, "
+              f"rounds={num_rounds}")
         print(f"    Stim detectors: {self.num_stim_detectors}")
         print(f"    Data qubits: {len(self.stim_data_qubit_indices)}")
         print(f"    Graph nodes: {self.graph_mapper.num_nodes}")
 
+    # ------------------------------------------------------------------ #
+    # Code-type-specific setup
+    # ------------------------------------------------------------------ #
+    def _init_heavyhex(self):
+        from generators.heavyhex_surface_code import (
+            HEAVYHEX_D3, create_heavyhex_surface_code_circuit
+        )
+        self.cfg = HEAVYHEX_D3
+        self.num_stabilizers = self.cfg["num_ancilla"]
+        self.num_data_qubits = self.cfg["num_data"]
+        self.stim_circuit = create_heavyhex_surface_code_circuit(
+            distance=self.distance, rounds=self.num_rounds, noise=0.001
+        )
+        self.num_stim_detectors = self.num_rounds * self.num_stabilizers
+        self.stim_data_qubit_indices = list(range(self.cfg["num_data"]))
+
+        # Mapper inputs: heavyhex has its own ancilla→stabilizer dicts
+        z_stabs = [self.cfg["z_stabilizers"][a] for a in self.cfg["z_ancilla"]]
+        x_stabs = [self.cfg["x_stabilizers"][a] for a in self.cfg["x_ancilla"]]
+        self._mapper_x = z_stabs    # preserving legacy (swapped) ordering
+        self._mapper_z = x_stabs
+
+        # Heavyhex has no m2d converter (kept None → MWPM path uses legacy
+        # lookup decoder, not Stim DEM).
+        self.stim_reference_circuit = None
+        self.m2d_converter = None
+
+    def _init_surface_code(self):
+        from circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
+        sc = SurfaceCodeCircuit(distance=self.distance, num_rounds=self.num_rounds)
+        self.num_stabilizers = sc.num_stabilizers
+        self.num_data_qubits = sc.num_data
+        self.stim_data_qubit_indices = list(range(sc.num_data))
+        self._mapper_x = sc.x_stabilizers
+        self._mapper_z = sc.z_stabilizers
+        self.cfg = None
+        self.stim_circuit = None
+
+        # Build a Stim reference circuit that mirrors the Qiskit schedule so
+        # that compile_m2d_converter produces detectors compatible with our
+        # hardware measurement ordering.
+        self._x_stabs = sc.x_stabilizers
+        self._z_stabs = sc.z_stabilizers
+        self._logical_z = sc.logical_z
+        self.stim_reference_circuit = build_qiskit_style_stim_circuit(
+            distance=self.distance,
+            num_rounds=self.num_rounds,
+            x_stabilizers=sc.x_stabilizers,
+            z_stabilizers=sc.z_stabilizers,
+            logical_z_qubits=sc.logical_z,
+            noise=None,
+        )
+        self.m2d_converter = self.stim_reference_circuit.compile_m2d_converter()
+        self.num_stim_detectors = self.stim_reference_circuit.num_detectors
+
     def _initialize_mappers(self):
-        """Heavyhex TRUE stabilizer 기반 mapper 초기화."""
-        from common.mapper_surface import SurfaceCodeGraphMapper, SurfaceCodeImageMapper
-
-        cfg = self.cfg
-        z_stabs = [cfg["z_stabilizers"][a] for a in cfg["z_ancilla"]]
-        x_stabs = [cfg["x_stabilizers"][a] for a in cfg["x_ancilla"]]
-
+        from common.mapper_surface import (
+            SurfaceCodeGraphMapper, SurfaceCodeImageMapper,
+        )
         self.graph_mapper = SurfaceCodeGraphMapper(
-            self.distance, self.num_rounds, z_stabs, x_stabs
+            self.distance, self.num_rounds, self._mapper_x, self._mapper_z
         )
         self.image_mapper = SurfaceCodeImageMapper(
             self.distance, self.num_rounds, self.num_stabilizers
         )
         self.edge_index = self.graph_mapper.get_edges()
 
-        # Phase 1에서 저장한 edge 파일이 있으면 로드
+        # Prefer cached edges from Phase 1 training pipeline
         edge_path = None
         if self.edge_dir is not None:
             edge_path = os.path.join(self.edge_dir, f"edges_d{self.distance}.npy")
@@ -102,79 +287,121 @@ class StimFormatConverter:
                 stim_dir, "dataset", self.code_type, "graph",
                 f"edges_d{self.distance}.npy"
             )
-
         if edge_path and os.path.exists(edge_path):
             self.edge_index = np.load(edge_path)
             print(f"    Loaded Phase 1 edges: {edge_path}")
         else:
             print(f"    Using edges from SurfaceCodeGraphMapper")
 
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
     def get_data_qubit_indices(self) -> List[int]:
-        """모델 출력에서 data qubit에 해당하는 인덱스."""
         return self.stim_data_qubit_indices
 
-    def hw_to_stim_detectors(self, raw_syndromes: np.ndarray) -> np.ndarray:
+    def _temporal_differencing_only(self, raw_syndromes: np.ndarray) -> np.ndarray:
         """
-        HW raw syndrome → Stim-compatible flat detector 배열로 변환.
+        Legacy ML-format detector conversion: per-round temporal differencing
+        with round 0 = raw syndrome. Kept for the ML decoders whose training
+        pipeline uses this same representation (stim generate_dataset).
 
-        처리 순서:
-          1. Temporal differencing (no-reset XOR tracking)
-          2. HW → Stim 순서 재배열 (Z만 매핑, X 마스킹)
-
-        Args:
-            raw_syndromes: (N, num_rounds, 8) — HW 측정 순서 per-cycle
-
-        Returns:
-            stim_detectors: (N, num_rounds * 8) — Stim 순서, temporal-differenced
+        NOTE: This is NOT valid as Stim DEM detector input (round-0 X-stab
+        is not deterministic in |0>_L). Do not feed this to pymatching.
         """
-        from generators.heavyhex_surface_code import reorder_hw_to_stim
-
-        N, num_rounds, num_stab = raw_syndromes.shape
-
-        # Step 1: Temporal differencing (no-reset 보정)
+        N, nr, _ = raw_syndromes.shape
         detectors = np.zeros_like(raw_syndromes)
         detectors[:, 0, :] = raw_syndromes[:, 0, :]
-        for r in range(1, num_rounds):
+        for r in range(1, nr):
             detectors[:, r, :] = (
                 raw_syndromes[:, r, :] != raw_syndromes[:, r - 1, :]
             ).astype(np.float32)
+        return detectors.reshape(N, -1)
 
-        # Step 2: Flatten → (N, num_rounds * 8)
-        flat_hw = detectors.reshape(N, -1)
-
-        # Step 3: HW → Stim 순서 재배열 (Z만 매핑, X = 0)
-        flat_stim = reorder_hw_to_stim(flat_hw, num_rounds)
-
-        return flat_stim
-
-    def to_graph_format(self, raw_syndromes: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def hw_to_stim_detectors(self, raw_syndromes: np.ndarray) -> np.ndarray:
         """
-        HW syndrome → Graph 모델 입력.
+        HW raw syndrome → ML-format flat detector array.
+
+        Args:
+            raw_syndromes: (N, num_rounds, num_stabilizers)
 
         Returns:
-            node_features: (N, num_nodes, feature_dim)
-            edge_index: (2, num_edges)
+            (N, num_rounds * num_stabilizers)
+
+        Used by the graph/image mappers for ML decoders. MWPM should instead
+        go through `hw_to_mwpm_detectors()` which uses the Stim m2d converter.
         """
+        N, nr, _ = raw_syndromes.shape
+        flat = self._temporal_differencing_only(raw_syndromes)
+
+        if self.code_type == "heavyhex_surface_code":
+            from generators.heavyhex_surface_code import reorder_hw_to_stim
+            flat = reorder_hw_to_stim(flat, nr)
+
+        return flat
+
+    # Alias to keep older call sites working.
+    hw_to_stim_syndromes = hw_to_stim_detectors
+
+    def hw_to_mwpm_detectors(self, raw_syndromes: np.ndarray,
+                              data_states: np.ndarray) -> np.ndarray:
+        """
+        HW measurements → Stim DEM-compatible detector array for MWPM.
+
+        Uses the m2d converter built from a Stim reference circuit that
+        exactly mirrors our Qiskit measurement schedule:
+          chronological measurement order =
+            round 0 [X_0..X_{nx-1}, Z_0..Z_{nz-1}],
+            round 1 [...], ..., round R-1 [...],
+            final M [data_0..data_{nd-1}].
+
+        Args:
+            raw_syndromes: (N, num_rounds, num_stabilizers) — same layout as
+                           produced by SyndromeExtractor.
+            data_states:   (N, num_data) — final data qubit measurements.
+
+        Returns:
+            (N, num_stim_detectors) uint8 detector array matching the Stim
+            reference circuit's detector order.
+        """
+        if self.m2d_converter is None:
+            raise RuntimeError(
+                f"hw_to_mwpm_detectors is only available for surface_code "
+                f"(code_type={self.code_type!r})."
+            )
+        N, nr, ns = raw_syndromes.shape
+        if nr != self.num_rounds or ns != self.num_stabilizers:
+            raise ValueError(
+                f"raw_syndromes shape {(nr, ns)} does not match expected "
+                f"({self.num_rounds}, {self.num_stabilizers})."
+            )
+        if data_states.shape[0] != N or data_states.shape[1] != self.num_data_qubits:
+            raise ValueError(
+                f"data_states shape {data_states.shape} inconsistent with "
+                f"syndromes (N={N}, num_data={self.num_data_qubits})."
+            )
+
+        syn_flat = raw_syndromes.reshape(N, nr * ns).astype(np.bool_)
+        data_flat = data_states.astype(np.bool_)
+        measurements = np.concatenate([syn_flat, data_flat], axis=1)
+
+        detectors, _ = self.m2d_converter.convert(
+            measurements=measurements, separate_observables=True,
+            append_observables=False,
+        )
+        return detectors.astype(np.uint8)
+
+    def to_graph_format(self, raw_syndromes: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         stim_detectors = self.hw_to_stim_detectors(raw_syndromes)
         node_features = self.graph_mapper.map_to_node_features(stim_detectors)
         return node_features, self.edge_index
 
     def to_image_format(self, raw_syndromes: np.ndarray) -> np.ndarray:
-        """
-        HW syndrome → Image 모델 입력.
-
-        Returns:
-            images: (N, 1, H, W)
-        """
         stim_detectors = self.hw_to_stim_detectors(raw_syndromes)
-        images = self.image_mapper.map_to_images(stim_detectors)
-        return images
+        return self.image_mapper.map_to_images(stim_detectors)
 
     def get_model_input_shape(self, model_type: str) -> tuple:
-        """모델 타입에 따른 예상 입력 shape."""
         if model_type == "graph":
             return (self.graph_mapper.num_nodes, 6)
-        elif model_type == "image":
+        if model_type == "image":
             return (self.num_rounds, self.image_mapper.height, self.image_mapper.width)
-        else:
-            raise ValueError(f"Unknown model_type: {model_type}")
+        raise ValueError(f"Unknown model_type: {model_type}")

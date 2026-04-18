@@ -26,6 +26,8 @@ from legacy.mapper_graph import SyndromeGraphMapper
 from logger import log_to_file
 from paths import ProjectPaths
 
+CODE_ALIAS = {"color": "color_code", "surface": "surface_code", "heavyhex": "heavyhex_surface_code"}
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Graph Dataset Generator")
     parser.add_argument("-c", "--code", nargs="+", type=str, default=None)
@@ -36,6 +38,8 @@ def parse_args():
     return parser.parse_args()
 
 ARGS = parse_args()
+if ARGS.code:
+    ARGS.code = [CODE_ALIAS.get(c, c) for c in ARGS.code]
 PATHS = ProjectPaths(ROOT_DIR)
 
 CONFIG = PATHS.load_stim_config()

@@ -38,6 +38,8 @@ from utils.focal_loss import FocalLoss, CombinedLoss
 from logger import log_to_file
 from paths import ProjectPaths
 
+CODE_ALIAS = {"color": "color_code", "surface": "surface_code", "heavyhex": "heavyhex_surface_code"}
+
 # ==============================================================================
 # CLI
 # ==============================================================================
@@ -52,6 +54,8 @@ def parse_args():
     return parser.parse_args()
 
 ARGS = parse_args()
+if ARGS.code:
+    ARGS.code = [CODE_ALIAS.get(c, c) for c in ARGS.code]
 
 if ARGS.gpu is not None:
     torch.cuda.set_device(ARGS.gpu)

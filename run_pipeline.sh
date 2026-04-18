@@ -1,36 +1,33 @@
 #!/bin/bash
+PIPELINE_ID=Final_Results
 
-echo "=== KCS 프로젝트 통합 파이프라인 시작 ==="
+# 각 프로세서를 독립적으로 5회 순차 실행, 프로세서 간은 병렬
+run_sequential() {
+    local platform=$1
+    local backend=$2
+    local runs=("1st" "2nd" "3rd" "4th" "5th")
+    local models="CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba"
 
-echo "=== [1단계] ==="
-# 
-python3 run_suite.py --train -c color_code -d 5 --gpu0 CNN GCNII APPNP GraphTransformer --gpu1 GCN GAT GNN GraphMamba > logs/color_code_5_train.log 2>&1 &
-python3 run_suite.py --generate -c heavyhex_surface_code -n realistic/dp0.005_mf0.02_rf0.02_gd0.015 realistic/dp0.01_mf0.05_rf0.05_gd0.01 -d 3 --cpu full > logs/heavyhex_3_generate1.log 2>&1 &
+    for run in "${runs[@]}"; do
+        echo "============================================"
+        echo "[${platform}/${backend:-default}] ${run} 시작"
+        echo "============================================"
+        if [ "$platform" == "ibm" ]; then
+            python3 run_suite.py --id $PIPELINE_ID/$run --experiment ibm -b $backend -m $models
+        else
+            python3 run_suite.py --id $PIPELINE_ID/$run --experiment ionq -m $models
+        fi
+        echo "============================================"
+        echo "[${platform}/${backend:-default}] ${run} 완료"
+        echo "============================================"
+    done
+}
 
-echo "=== [대기] 1단계 작업들이 모두 끝날 때까지 대기 중... ==="
+# 3개 프로세서 병렬, 각각 내부적으로 5회 순차
+run_sequential ibm ibm_boston &
+run_sequential ibm ibm_pittsburgh &
+run_sequential ibm ibm_aachen &
+run_sequential ionq &
+
 wait
-
-echo "=== [2단계] ==="
-# 
-python3 run_suite.py --experiment ionq -c color_code -d 5 -m CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba > logs/color_code_5_experiment.log 2>&1 &
-python3 stim_simulation/simulation/generate_dataset_image.py -c heavyhex_surface_code -n realistic/dp0.001_mf0.01_rf0.01_gd0.008 -d 3 --cpu full > logs/heavyhex_3_generate2.log 2>&1 &
-
-echo "=== [대기] 2단계 작업들이 모두 끝날 때까지 대기 중... ==="
-wait
-
-echo "=== [3단계] ==="
-# 
-
-python3 run_suite.py --train -c heavyhex_surface_code -d 3 --gpu0 CNN GCNII APPNP GraphTransformer --gpu1 GCN GAT GNN GraphMamba > logs/heavyhex_3_train.log 2>&1 &
-
-echo "=== [대기] 3단계 작업들이 모두 끝날 때까지 대기 중... ==="
-wait
-
-echo "=== [4단계] ==="
-# 
-python3 run_suite.py --experiment ibm -d 3 -m CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba > logs/heavyhex_3_experiment.log 2>&1 &
-
-echo "=== [대기] 4단계 작업들이 모두 끝날 때까지 대기 중... ==="
-wait
-
-echo "=== 🎉 KCS 프로젝트 통합 파이프라인 모든 과정 완료! ==="
+echo "=== 🎉 데이터 수집 완료 ==="

@@ -11,6 +11,8 @@ import os
 import sys
 import json
 from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+from qiskit_aer.noise import NoiseModel, depolarizing_error, ReadoutError
  
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -87,32 +89,79 @@ class IonQSimulator:
             raise ValueError(f"Unknown backend_type: {self.backend_type}")
     
     def run(self, circuit: QuantumCircuit, shots: int = 1000) -> dict:
-        """
-        회로를 IonQ에 제출하고 결과를 반환합니다.
-        optimization_level=0으로 트랜스파일하여 게이트 재합성을 방지합니다.
-        """
-        # 트랜스파일 (optimization_level=0: 재합성 방지)
+        has_mcm = any(
+            instr.operation.name in ('reset', 'if_else')
+            for instr in circuit.data
+            if instr.operation.name not in ('barrier', 'measure')
+        )
+
+        if has_mcm:
+            return self._run_aer_fallback(circuit, shots)
+
+        # ── d=3: 기존 IonQ 클라우드 시뮬레이터 경로 ──
         transpiled = transpile(circuit, backend=self.backend, optimization_level=0)
-        
-        # 큐빗 수 검증
+
         if transpiled.num_qubits > self.max_qubits:
             raise ValueError(
                 f"Transpiled circuit uses {transpiled.num_qubits} qubits, "
                 f"but {self.noise_model} supports max {self.max_qubits}."
             )
-        
+
         print(f"[IonQSimulator] Submitting job (shots={shots}, qubits={transpiled.num_qubits})...")
         print(f"[IonQSimulator] Circuit: depth={transpiled.depth()}, gates={dict(transpiled.count_ops())}")
-        
+
         job = self.backend.run(transpiled, shots=shots)
         print(f"[IonQSimulator] Job ID: {job.job_id()}")
         print(f"[IonQSimulator] Waiting for results...")
-        
+
         result = job.result()
         counts = result.get_counts(transpiled)
         print(f"[IonQSimulator] Completed. Unique outcomes: {len(counts)}")
-        
+
         return counts
+
+    def _run_aer_fallback(self, circuit: QuantumCircuit, shots: int) -> dict:
+        """
+        d=5 ancilla reuse 회로용 로컬 Aer 시뮬레이션.
+        IonQ API가 mid-circuit measurement를 지원하지 않으므로
+        Forte-1 공개 스펙 기반 노이즈 모델로 로컬 실행.
+        """
+        noise_model = self._build_forte1_noise_model()
+        aer_backend = AerSimulator(noise_model=noise_model)
+        transpiled = transpile(circuit, backend=aer_backend, optimization_level=0)
+
+        print(f"[IonQSimulator] MCM detected → AerSimulator fallback (forte-1 noise)")
+        print(f"[IonQSimulator] Circuit: qubits={transpiled.num_qubits}, "
+            f"depth={transpiled.depth()}, gates={dict(transpiled.count_ops())}")
+
+        result = aer_backend.run(transpiled, shots=shots).result()
+        counts = result.get_counts(transpiled)
+        print(f"[IonQSimulator] Aer completed. Unique outcomes: {len(counts)}")
+
+        return counts
+
+    def _build_forte1_noise_model(self) -> NoiseModel:
+        """IonQ Forte-1 공개 캘리브레이션 기반 노이즈 모델."""
+        noise_model = NoiseModel()
+
+        # Forte-1 specs (ionq.com/quantum-systems/forte-enterprise)
+        err_1q = 0.0002   # 1Q RB error ~0.02%
+        err_2q = 0.004    # 2Q DRB error ~0.4%
+        err_spam = 0.005  # SPAM error  ~0.5%
+
+        noise_model.add_all_qubit_quantum_error(
+            depolarizing_error(err_1q, 1), ['h', 'x', 'y', 'z', 'ry', 'rz', 's', 'sdg']
+        )
+        noise_model.add_all_qubit_quantum_error(
+            depolarizing_error(err_2q, 2), ['cx']
+        )
+        ro_err = ReadoutError(
+            [[1 - err_spam, err_spam],
+            [err_spam, 1 - err_spam]]
+        )
+        noise_model.add_all_qubit_readout_error(ro_err)
+
+        return noise_model
     
     def get_backend_info(self) -> dict:
         return {

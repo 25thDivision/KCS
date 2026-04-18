@@ -40,6 +40,10 @@ class ProjectPaths:
     @property
     def keys_path(self) -> str:
         return os.path.join(self.root, "keys.json")
+    
+    @property
+    def logs_dir(self) -> str:
+        return os.path.join(self.root, "logs")
 
     # =========================================================================
     # stim_simulation 경로
