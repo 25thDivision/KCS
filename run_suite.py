@@ -57,6 +57,7 @@ def run_cmd(cmd, cwd=None, log=None, async_run=False):
         log_dir = os.path.join(LOG_DIR, PIPELINE_ID)
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, log)
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
         print(f"     Log: {log_path}")
         if async_run:
             f = open(log_path, "w")
@@ -158,7 +159,7 @@ def do_generate(args):
         log.append(f"d{''.join(str(d) for d in args.distance)}")
     if args.noise:
         extra += ["-n"] + args.noise
-        log.append(f"{'-'.join(args.noise)}")
+        log.append(f"{'-'.join(n.replace('/', '_') for n in args.noise)}")
     if args.error_type:
         extra += ["-e"] + args.error_type
         log.append(f"{'-'.join(args.error_type)}")
@@ -199,6 +200,9 @@ def do_train(args):
             if args.distance:
                 cmd0 += ["-d"] + [str(d) for d in args.distance]
                 log0.append(f"d{''.join(str(d) for d in args.distance)}")
+            if args.noise:
+                cmd0 += ["-n"] + args.noise
+                log0.append(f"{'-'.join(n.replace('/', '_') for n in args.noise)}")
             # run_cmd의 결과를 p0로 받아서 리스트에 추가
             p0, f0 = run_cmd(cmd0, cwd=ROOT_DIR, log=f"train_{'_'.join(log0)}.log", async_run=True)
             if p0: processes.append((p0, f0))
@@ -213,6 +217,9 @@ def do_train(args):
             if args.distance:
                 cmd1 += ["-d"] + [str(d) for d in args.distance]
                 log1.append(f"d{''.join(str(d) for d in args.distance)}")
+            if args.noise:
+                cmd1 += ["-n"] + args.noise
+                log1.append(f"{'-'.join(n.replace('/', '_') for n in args.noise)}")
             # run_cmd의 결과를 p1로 받아서 리스트에 추가
             p1, f1 = run_cmd(cmd1, cwd=ROOT_DIR, log=f"train_{'_'.join(log1)}.log", async_run=True)
             if p1: processes.append((p1, f1))
@@ -244,7 +251,7 @@ def do_train(args):
             log.append(f"d{''.join(str(d) for d in args.distance)}")
         if args.noise:
             cmd += ["-n"] + args.noise
-            log.append(f"{'-'.join(args.noise)}")
+            log.append(f"{'-'.join(n.replace('/', '_') for n in args.noise)}")
 
         run_cmd(cmd, cwd=ROOT_DIR, log=f"train_{'_'.join(log)}.log")
         print(f"\n  ✅ Training complete!")

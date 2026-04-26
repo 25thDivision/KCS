@@ -13,9 +13,20 @@ IBM 신드롬 → Stim 호환 형태 변환기
     (Round 0에서는 Z-stab detector만 존재하고, round r≥1은 이전 round와의
     XOR, 최종은 data 측정에서 재구성한 Z-stab과 마지막 syndrome의 XOR.)
 
+Ancilla reuse (no reset) 대응:
+  Nighthawk/ibm_miami에는 reset 명령이 ISA에 없으므로 Qiskit HW 회로는
+  round 간 ancilla를 reset하지 않고 재사용한다. 후속 round의 CX 체인이
+  측정 후 classical collapse된 ancilla 상태 위로 새 stabilizer를 XOR
+  시키므로 raw 측정값은 stabilizer의 *누적 XOR* (raw_r = s_1⊕…⊕s_r) 이
+  된다. Stim 참조 회로는 그대로 `MR` (measure-reset) 을 유지하고,
+  HW 측에서 한 단계 single-differencing (raw_r ⊕ raw_{r-1} = s_r) 을 적용해
+  per-round syndrome으로 환산한 뒤 downstream 로직에 넘긴다. 이렇게 하면
+  DEM, m2d converter, ML 모델 모두 기존 MR 가정의 입력을 그대로 받는다.
+
 공통 처리:
-  1. ML 경로용: temporal differencing된 detector array (기존 포맷)
-  2. MWPM 경로용: Stim compile_m2d_converter 결과 (surface_code only)
+  1. ML 경로용: cumulative→per-round 변환 후 temporal differencing된 detector
+  2. MWPM 경로용: cumulative→per-round 변환 후 Stim compile_m2d_converter 결과
+     (surface_code only)
   3. SurfaceCodeGraphMapper / SurfaceCodeImageMapper로 ML 입력 생성
   4. Phase 1에서 저장한 edges_dK.npy가 있으면 로드
 """
@@ -317,6 +328,25 @@ class StimFormatConverter:
             ).astype(np.float32)
         return detectors.reshape(N, -1)
 
+    def _cumulative_to_per_round(self, raw_syndromes: np.ndarray) -> np.ndarray:
+        """
+        Convert cumulative-XOR raws from the no-reset Qiskit circuit into
+        per-round syndrome values (s_r = raw_r XOR raw_{r-1}, raw_{-1} = 0).
+
+        Applied only for surface_code (heavyhex path keeps its legacy
+        handling). After this, downstream treatment matches the MR-based
+        Stim reference (raw_r = s_r), so ML temporal-differencing and the
+        m2d converter both work unchanged.
+        """
+        N, nr, ns = raw_syndromes.shape
+        per_round = np.zeros_like(raw_syndromes)
+        per_round[:, 0, :] = raw_syndromes[:, 0, :]
+        for r in range(1, nr):
+            per_round[:, r, :] = (
+                raw_syndromes[:, r, :] != raw_syndromes[:, r - 1, :]
+            ).astype(raw_syndromes.dtype)
+        return per_round
+
     def hw_to_stim_detectors(self, raw_syndromes: np.ndarray) -> np.ndarray:
         """
         HW raw syndrome → ML-format flat detector array.
@@ -330,7 +360,10 @@ class StimFormatConverter:
         Used by the graph/image mappers for ML decoders. MWPM should instead
         go through `hw_to_mwpm_detectors()` which uses the Stim m2d converter.
         """
-        N, nr, _ = raw_syndromes.shape
+        if self.code_type == "surface_code":
+            raw_syndromes = self._cumulative_to_per_round(raw_syndromes)
+
+        nr = raw_syndromes.shape[1]
         flat = self._temporal_differencing_only(raw_syndromes)
 
         if self.code_type == "heavyhex_surface_code":
@@ -380,7 +413,12 @@ class StimFormatConverter:
                 f"syndromes (N={N}, num_data={self.num_data_qubits})."
             )
 
-        syn_flat = raw_syndromes.reshape(N, nr * ns).astype(np.bool_)
+        # Qiskit HW circuit has no between-round reset; raws are cumulative.
+        # Convert to per-round syndromes so that the MR-based Stim reference
+        # sees matching measurement semantics.
+        per_round = self._cumulative_to_per_round(raw_syndromes)
+
+        syn_flat = per_round.reshape(N, nr * ns).astype(np.bool_)
         data_flat = data_states.astype(np.bool_)
         measurements = np.concatenate([syn_flat, data_flat], axis=1)
 

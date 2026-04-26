@@ -1,17 +1,26 @@
 """
 Nighthawk (ibm_miami) qubit selection for rotated surface code.
 
-ibm_miami is a ~120 qubit square lattice (best estimate: 10x12). The rotated
-surface code embeds naturally: data qubits on even grid sites, ancilla on odd
-sites. Each ancilla is adjacent (in the coupling graph) to the 2-4 data qubits
-of its stabilizer.
+ibm_miami is a 120-qubit 4-neighbor square lattice with row-major indexing:
+Q0..Q9 form the top row, Q10..Q19 the second row, etc. Its coupling map has
+no diagonal edges, so Stim's canonical rotated_memory_z layout (which uses
+sqrt(2) diagonal edges between data and ancilla in the native coord system)
+cannot be dropped in directly.
 
-This module enumerates (d+1)x(d+1) sliding-window candidate patches, validates
-coupling-map coverage for all required CX edges of a given distance, then
-scores each patch by average CX / readout error to pick the best.
+We work around this by extracting Stim's canonical QUBIT_COORDS and applying
+a 45-degree rotation (x, y) -> ((x+y)//2, (y-x)//2). After rotation all
+data<->ancilla edges are orthogonal (distance 1) and the patch is an
+axis-aligned (2d-1) x (2d-1) square embeddable in a 4-neighbor grid.
 
-Compatible logical indexing with `qiskit_surface_code_generator.SurfaceCodeCircuit`:
-  - Data qubits: logical indices 0 .. d^2 - 1 (row-major in the dxd data grid)
+Stim qubit indices are mapped to Qiskit SurfaceCodeCircuit logical indices by:
+  - data qubits: sorted Stim index -> 0..d^2-1 (Stim's data order already
+    matches Qiskit's row-major order because Stim coords sort by (y, x))
+  - ancillas: Stim ancilla is matched to Qiskit stabilizer with equal support
+    (support sets are identical under the sorted data mapping; the
+    Stim<->Qiskit X/Z label swap is a labeling difference handled downstream)
+
+Logical indexing compatible with SurfaceCodeCircuit:
+  - Data qubits: logical indices 0 .. d^2 - 1
   - Ancilla qubits: logical indices d^2 .. d^2 + num_stabilizers - 1
     (order matches SurfaceCodeCircuit.x_stabilizers + z_stabilizers)
 """
@@ -20,6 +29,7 @@ import os
 import sys
 
 import numpy as np
+import stim
 from typing import Dict, List, Tuple, Optional
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,11 +40,29 @@ if _ibm_dir not in sys.path:
 from circuits.qiskit_surface_code_generator import SurfaceCodeCircuit
 
 
+# Row-major square lattice assumed for ibm_miami (Nighthawk).
+NIGHTHAWK_GRID_SHAPE: Tuple[int, int] = (12, 10)  # (num_rows, num_cols)
+
+
+def index_to_coord(idx: int,
+                   grid_shape: Tuple[int, int] = NIGHTHAWK_GRID_SHAPE
+                   ) -> Tuple[int, int]:
+    _, ncols = grid_shape
+    return (idx // ncols, idx % ncols)
+
+
+def coord_to_index(row: int, col: int,
+                   grid_shape: Tuple[int, int] = NIGHTHAWK_GRID_SHAPE) -> int:
+    _, ncols = grid_shape
+    return row * ncols + col
+
+
 def _infer_grid_shape(num_qubits: int) -> Tuple[int, int]:
-    """Guess (rows, cols) for Nighthawk-style square lattice."""
-    if num_qubits == 120:
-        return (10, 12)
-    # Try to find factor pair closest to square
+    """Return (rows, cols) for a row-major square lattice backend."""
+    expected = NIGHTHAWK_GRID_SHAPE[0] * NIGHTHAWK_GRID_SHAPE[1]
+    if num_qubits == expected:
+        return NIGHTHAWK_GRID_SHAPE
+    # Generic fallback: factor pair closest to square.
     best = (1, num_qubits)
     for r in range(1, int(np.sqrt(num_qubits)) + 2):
         if num_qubits % r == 0:
@@ -52,48 +80,161 @@ def _coupling_adjacency(edges: List[Tuple[int, int]]) -> Dict[int, set]:
     return adj
 
 
+def _extract_stim_canonical_layout(distance: int):
+    """
+    Parse a Stim-generated surface_code:rotated_memory_z circuit to extract
+    the canonical embedding. Returns:
+      coords:         {stim_qubit_idx: (x, y)} integer coordinates
+      stim_data:      sorted list of Stim data qubit indices
+      stim_ancilla:   list of Stim ancilla indices in first-MR order
+      stim_support:   {stim_anc_idx: sorted list of Stim data indices it CXs with}
+    """
+    circ = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=distance, rounds=distance,
+        before_round_data_depolarization=0.001,
+    )
+
+    coords: Dict[int, Tuple[int, int]] = {}
+    for inst in circ:
+        if inst.name == "QUBIT_COORDS":
+            args = inst.gate_args_copy()
+            for t in inst.targets_copy():
+                coords[t.value] = (int(args[0]), int(args[1]))
+
+    data_set = set()
+    anc_order: List[int] = []
+    anc_seen = set()
+    for inst in circ.flattened():
+        if inst.name == "DEPOLARIZE1":
+            for t in inst.targets_copy():
+                data_set.add(t.value)
+        elif inst.name == "MR":
+            for t in inst.targets_copy():
+                if t.value not in anc_seen:
+                    anc_order.append(t.value)
+                    anc_seen.add(t.value)
+    stim_data = sorted(data_set)
+    stim_ancilla = [a for a in anc_order if a not in data_set]
+
+    cx_src: Dict[int, set] = {}
+    cx_tgt: Dict[int, set] = {}
+    for inst in circ.flattened():
+        if inst.name in ("CX", "CNOT", "ZCX", "CZ", "XCZ"):
+            ts = [t.value for t in inst.targets_copy()]
+            for i in range(0, len(ts), 2):
+                s, t = ts[i], ts[i + 1]
+                cx_src.setdefault(s, set()).add(t)
+                cx_tgt.setdefault(t, set()).add(s)
+    stim_support: Dict[int, List[int]] = {}
+    for a in stim_ancilla:
+        supp = (cx_src.get(a, set()) | cx_tgt.get(a, set())) & data_set
+        stim_support[a] = sorted(supp)
+
+    return coords, stim_data, stim_ancilla, stim_support
+
+
+def _rotate_45(coords: Dict[int, Tuple[int, int]]) -> Dict[int, Tuple[int, int]]:
+    """Apply (x, y) -> ((x+y)//2, (y-x)//2) and normalize to non-negative origin."""
+    raw = {q: ((x + y) // 2, (y - x) // 2) for q, (x, y) in coords.items()}
+    min_r = min(p[0] for p in raw.values())
+    min_c = min(p[1] for p in raw.values())
+    return {q: (r - min_r, c - min_c) for q, (r, c) in raw.items()}
+
+
 def _build_logical_to_grid(distance: int) -> Tuple[Dict[int, Tuple[int, int]], List[Tuple[int, Tuple[int, int], Tuple[int, int]]]]:
     """
-    Build the logical-qubit -> local grid-position mapping for the rotated
-    surface code patch. Returns:
+    Build logical-qubit -> local grid-position mapping using the 45-degree
+    rotation of Stim's canonical rotated_memory_z layout. Resulting embedding
+    is native to a 4-neighbor square lattice: every CX edge has manhattan
+    distance 1.
+
+    Returns:
       logical_to_pos: dict mapping logical index -> (row, col) within a
-        (2d-1) x (2d-1) local grid. Data sits at (2i, 2j); ancilla at the
-        center of their stabilizer plaquette (or on the boundary edge).
-      cx_edges: list of (ancilla_logical, (anc_pos), (data_pos)) tuples
-        describing every CX adjacency the circuit requires, as grid positions.
+        (2d-1) x (2d-1) local grid.
+      cx_edges: list of (ancilla_logical, anc_pos, data_pos) tuples for each
+        required CX adjacency, with anc_pos / data_pos given as grid positions.
+
+    Logical indexing:
+      - Data qubits: 0 .. d^2 - 1, ordered by Qiskit SurfaceCodeCircuit row-major.
+      - Ancillas:    d^2 .. d^2 + num_stab - 1, ordered as x_stabilizers + z_stabilizers.
+
+    Stim -> Qiskit mapping:
+      - Data: sorted Stim index -> Qiskit logical index (Stim coord order
+        sorts by y then x, which matches Qiskit row-major).
+      - Ancilla: each Qiskit stabilizer is matched to the Stim ancilla whose
+        CX support (expressed in Qiskit data indices) is set-equal to it.
+        (Support sets coincide; only the X/Z label differs between Stim and
+        Qiskit, and that labeling is handled by the measurement schedule.)
+
+    Raises AssertionError if any CX edge is not 4-neighbor after rotation,
+    or if any Qiskit stabilizer lacks a matching Stim ancilla.
     """
     d = distance
     sc = SurfaceCodeCircuit(distance=d, num_rounds=1)
 
-    logical_to_pos: Dict[int, Tuple[int, int]] = {}
-    # Data qubits on even sites: index r*d + c at (2r, 2c)
-    for r in range(d):
-        for c in range(d):
-            logical_to_pos[r * d + c] = (2 * r, 2 * c)
+    coords, stim_data, stim_ancilla, stim_support = _extract_stim_canonical_layout(d)
+    rot = _rotate_45(coords)
 
-    # Ancilla: stabilizer centers. Combined list: X stabs then Z stabs.
-    all_stabs = sc.x_stabilizers + sc.z_stabilizers
+    stim_to_qiskit_data = {s: i for i, s in enumerate(stim_data)}
+    stim_anc_qsupport = {
+        a: sorted(stim_to_qiskit_data[s] for s in stim_support[a])
+        for a in stim_ancilla
+    }
+
+    qiskit_stabs = [sorted(s) for s in (sc.x_stabilizers + sc.z_stabilizers)]
+
+    qiskit_anc_to_stim: Dict[int, int] = {}
+    used: set = set()
+    for anc_local, qstab in enumerate(qiskit_stabs):
+        matched = None
+        for sa in stim_ancilla:
+            if sa in used:
+                continue
+            if stim_anc_qsupport[sa] == qstab:
+                matched = sa
+                break
+        if matched is None:
+            raise RuntimeError(
+                f"[_build_logical_to_grid] No Stim ancilla matches Qiskit "
+                f"stabilizer #{anc_local} (support {qstab}). "
+                f"Stim supports (in Qiskit indices): {stim_anc_qsupport}"
+            )
+        qiskit_anc_to_stim[anc_local] = matched
+        used.add(matched)
+
+    logical_to_pos: Dict[int, Tuple[int, int]] = {}
+    for qidx, sidx in enumerate(stim_data):
+        logical_to_pos[qidx] = rot[sidx]
+    for anc_local, sa in qiskit_anc_to_stim.items():
+        logical_to_pos[d * d + anc_local] = rot[sa]
+
     cx_edges: List[Tuple[int, Tuple[int, int], Tuple[int, int]]] = []
-    for anc_local, stab in enumerate(all_stabs):
+    for anc_local, qstab in enumerate(qiskit_stabs):
         anc_logical = d * d + anc_local
-        positions = [logical_to_pos[q] for q in stab]
-        ar = sum(p[0] for p in positions) / len(positions)
-        ac = sum(p[1] for p in positions) / len(positions)
-        # Round to nearest integer grid site; boundary-2 stabs have half-integer
-        # coords which get rounded toward the interior.
-        anc_pos = (int(round(ar)), int(round(ac)))
-        # If collision with a data qubit (both coords even), shift along the
-        # shorter extent toward the boundary.
-        if anc_pos in logical_to_pos.values():
-            rows = [p[0] for p in positions]
-            cols = [p[1] for p in positions]
-            if min(rows) == max(rows):
-                anc_pos = (rows[0] - 1 if rows[0] > 0 else rows[0] + 1, anc_pos[1])
-            else:
-                anc_pos = (anc_pos[0], cols[0] - 1 if cols[0] > 0 else cols[0] + 1)
-        logical_to_pos[anc_logical] = anc_pos
-        for dq in stab:
-            cx_edges.append((anc_logical, anc_pos, logical_to_pos[dq]))
+        anc_pos = logical_to_pos[anc_logical]
+        for dq in qstab:
+            dq_pos = logical_to_pos[dq]
+            dist = abs(anc_pos[0] - dq_pos[0]) + abs(anc_pos[1] - dq_pos[1])
+            if dist != 1:
+                raise AssertionError(
+                    f"[_build_logical_to_grid] Non-4-neighbor CX edge: "
+                    f"ancilla {anc_logical}@{anc_pos} <-> data {dq}@{dq_pos} "
+                    f"(manhattan distance {dist}). "
+                    f"45-degree rotation should yield all distance-1 edges."
+                )
+            cx_edges.append((anc_logical, anc_pos, dq_pos))
+
+    rs = [p[0] for p in logical_to_pos.values()]
+    cs = [p[1] for p in logical_to_pos.values()]
+    patch_h = max(rs) - min(rs) + 1
+    patch_w = max(cs) - min(cs) + 1
+    expected = 2 * d - 1
+    if patch_h != expected or patch_w != expected:
+        raise AssertionError(
+            f"[_build_logical_to_grid] Patch bounding box {patch_h}x{patch_w} "
+            f"does not match expected {expected}x{expected} for distance={d}."
+        )
 
     return logical_to_pos, cx_edges
 
@@ -275,7 +416,16 @@ if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, os.path.dirname(here))
 
+    class _CouplingMap:
+        def __init__(self, edges):
+            self._edges = edges
+
+        def get_edges(self):
+            return self._edges
+
     class _StubBackend:
+        """4-neighbor row-major square lattice stub (matches Nighthawk topology)."""
+
         def __init__(self, rows, cols):
             self.num_qubits = rows * cols
             edges = []
@@ -286,20 +436,12 @@ if __name__ == "__main__":
                         edges.append((q, q + 1))
                     if r + 1 < rows:
                         edges.append((q, q + cols))
-                    if r + 1 < rows and c + 1 < cols:
-                        edges.append((q, q + cols + 1))
-                    if r + 1 < rows and c > 0:
-                        edges.append((q, q + cols - 1))
-
-            class CM:
-                def __init__(s, e): s._e = e
-                def get_edges(s): return s._e
-            self.coupling_map = CM(edges)
+            self.coupling_map = _CouplingMap(edges)
 
         def properties(self):
             return None
 
-    be = _StubBackend(10, 12)
+    be = _StubBackend(*NIGHTHAWK_GRID_SHAPE)
     for d in (3, 5):
         print(f"\n=== distance={d} ===")
         res = select_best_patch(be, distance=d)

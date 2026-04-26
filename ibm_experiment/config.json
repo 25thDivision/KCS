@@ -4,8 +4,9 @@
         "instance": "Yonsei_internal",
         "backend_name": "ibm_miami",
         "shots": 1000,
-        "dynamical_decoupling": true,
-        "dd_sequence": "XY4"
+        "dynamical_decoupling": false,
+        "dd_sequence": "XX4",
+        "optimization_level": 2
     },
     "surface_code": {
         "distances": [3, 5],
@@ -29,7 +30,7 @@
         "logical_initial_state": 0
     },
     "evaluation": {
-        "code_type": "surface_code",
+        "code_type": "heavyhex_surface_code",
         "baselines": ["No_Correction", "MWPM"],
         "noise": "realistic/dp0_mf0.005_rf0.005_gd0.004",
         "top_models": ["CNN", "GCN", "GCNII", "GAT", "APPNP", "GNN", "GraphTransformer", "GraphMamba"],

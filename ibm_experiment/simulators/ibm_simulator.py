@@ -84,34 +84,68 @@ class IBMSimulator:
     def transpile_circuit(self, circuit: QuantumCircuit,
                           initial_layout=None,
                           dd_sequence: str = None,
-                          optimization_level: int = 1) -> QuantumCircuit:
+                          optimization_level: int = 2) -> QuantumCircuit:
         """
-        Transpile `circuit` to `self.backend`, optionally pinning the layout
-        and appending a `PadDynamicalDecoupling` scheduling pass.
+        Transpile `circuit` to `self.backend` via a preset pass manager with
+        explicit Nighthawk basis gates + backend coupling map, optionally
+        appending a `PadDynamicalDecoupling` scheduling pass.
         """
-        transpiled = transpile(
-            circuit, backend=self.backend,
-            initial_layout=initial_layout,
+        from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+
+        nighthawk_gates = ['cz', 'sx', 'rz', 'x', 'id']
+        pm_transpile = generate_preset_pass_manager(
             optimization_level=optimization_level,
+            basis_gates=nighthawk_gates,
+            coupling_map=self.backend.coupling_map,
+            initial_layout=initial_layout,
         )
+        transpiled = pm_transpile.run(circuit)
         if dd_sequence:
-            from qiskit.transpiler import PassManager
+            from qiskit.transpiler import PassManager, InstructionDurations
             from qiskit.transpiler.passes import (
                 ALAPScheduleAnalysis, PadDynamicalDecoupling,
             )
-            from qiskit.circuit.library import XGate, YGate
+            from qiskit.circuit.library import XGate
+            # ibm_miami basis = ['cz','sx','rz','x','id']; Y gate is not in
+            # the basis so PadDynamicalDecoupling rejects Y-containing
+            # sequences. Use X-only sequences instead.
             seqs = {
-                "XY4": [XGate(), YGate(), XGate(), YGate()],
-                "XY8": [XGate(), YGate(), XGate(), YGate(),
-                        YGate(), XGate(), YGate(), XGate()],
                 "XX":  [XGate(), XGate()],
+                "XX4": [XGate(), XGate(), XGate(), XGate()],
+                "XX8": [XGate(), XGate(), XGate(), XGate(),
+                        XGate(), XGate(), XGate(), XGate()],
             }
             if dd_sequence not in seqs:
                 raise ValueError(f"Unknown DD sequence: {dd_sequence}")
+
+            # ibm_miami preview target does not publish durations for reset
+            # (and sometimes measure). Pull whatever is available from the
+            # backend, then inject fallbacks only for instructions missing
+            # from the collected table.
+            try:
+                durations = InstructionDurations.from_backend(self.backend)
+            except Exception:
+                durations = InstructionDurations()
+
+            fallback = [
+                ("reset", None, 1000, "ns"),
+                ("measure", None, 1000, "ns"),
+                ("delay", None, 0, "ns"),
+            ]
+            for inst_name, qubits, val, unit in fallback:
+                try:
+                    durations.get(inst_name, qubits or 0)
+                except Exception:
+                    durations.update([(inst_name, qubits, val, unit)])
+
             pm = PassManager([
-                ALAPScheduleAnalysis(target=self.backend.target),
+                ALAPScheduleAnalysis(
+                    target=self.backend.target,
+                    durations=durations,
+                ),
                 PadDynamicalDecoupling(
                     target=self.backend.target,
+                    durations=durations,
                     dd_sequence=seqs[dd_sequence],
                     pulse_alignment=1,
                     skip_reset_qubits=True,
@@ -122,7 +156,7 @@ class IBMSimulator:
 
     def run(self, circuit: QuantumCircuit, shots: int = 1000,
             initial_layout=None, dd_sequence: str = None,
-            optimization_level: int = 1) -> dict:
+            optimization_level: int = 2) -> dict:
         """
         회로를 IBM 백엔드에 제출하고 결과를 반환합니다.
 
@@ -130,7 +164,8 @@ class IBMSimulator:
             circuit: 실행할 Qiskit 회로
             shots: 실행 횟수
             initial_layout: transpile 시 virtual->physical qubit layout
-            dd_sequence: "XY4", "XY8", "XX" 또는 None
+            dd_sequence: "XX", "XX4", "XX8" 또는 None (Y gate는 Nighthawk
+                basis에 없어 지원하지 않음)
             optimization_level: transpile 최적화 레벨
 
         Returns:

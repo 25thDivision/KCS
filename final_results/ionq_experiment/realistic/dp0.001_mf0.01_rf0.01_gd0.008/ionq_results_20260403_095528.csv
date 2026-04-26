@@ -1,2 +1,0 @@
-Model,Distance,Num_Rounds,Noise_Model,Shots,Stim_Error_Rate,Stim_Error_Type,Weight_Noise,Logical_Error_Rate,Total_Shots,Logical_Errors,Timestamp
-No_Correction,3,3,forte-1,1000,0,N/A,realistic/dp0.001_mf0.01_rf0.01_gd0.008,0.187000,1000,187,20260403_095528

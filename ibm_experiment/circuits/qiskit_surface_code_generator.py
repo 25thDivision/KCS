@@ -163,7 +163,16 @@ class SurfaceCodeCircuit:
         return qc
 
     def _build_reuse_circuit(self, initial_state: int) -> QuantumCircuit:
-        """Single ancilla register, reset between rounds for hardware mapping."""
+        """
+        Single ancilla register, NO reset between rounds (ancilla reuse via
+        XOR tracking). Required for Nighthawk / ibm_miami where `reset` is
+        not in the target ISA. Post-measurement ancilla collapses to a
+        classical value; the next round's CX chain XORs the new stabilizer
+        onto the existing ancilla state, so raw measurements are cumulative
+        in the stabilizer values. The converter (`StimFormatConverter`)
+        performs single-round differencing before handing data to the
+        downstream detector pipeline.
+        """
         num_stab = self.num_stabilizers
 
         data = QuantumRegister(self.num_data, "data")
@@ -184,10 +193,6 @@ class SurfaceCodeCircuit:
 
         for r in range(self.num_rounds):
             syn = syndrome_cregs[r]
-
-            if r > 0:
-                for i in range(num_stab):
-                    qc.reset(anc[i])
 
             anc_idx = 0
             for stab_qubits in self.x_stabilizers:

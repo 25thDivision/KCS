@@ -1,0 +1,224 @@
+최종 논문 목차
+Title: Quantifying the Simulation-to-Hardware Transfer Gap for Machine Learning Quantum Error Correction Decoders
+Abstract (~250 words)
+
+I. Introduction (~1p)
+
+QEC/NISQ 배경 및 ML decoder 부상
+NVIDIA Ising (2026) 언급 — industrial relevance + simulation-only 한계
+Problem statement: sim-to-hardware transfer gap이 정량화되지 않음
+Contributions (bullet 3–4개)
+Paper organization
+
+II. Background and Related Work (~1.5p)
+
+2.1 Quantum Error Correction (stabilizer formalism 요약)
+2.2 Color Code
+2.3 Surface Code and Heavy-Hex Variant
+2.4 ML-based QEC Decoders (Chamberland et al. 2026 NVIDIA 포함)
+2.5 The Simulation-to-Hardware Gap (literature gap 명시)
+
+III. Methodology (~2.5p)
+
+3.1 Code Implementations
+
+3.1.1 Color Code (d=3, 5) — IonQ Forte-1
+3.1.2 Heavy-Hex Surface Code (d=3) — IBM Heron R3
+
+
+3.2 Training Data Generation via Stim
+3.3 ML Decoder Architectures (8 models 요약표)
+3.4 Baselines: No Correction and MWPM
+3.5 Hybrid MWPM+ML Decoder (NVIDIA pre-decoder와의 순서 차이 명시)
+3.6 Hardware Experiment Setup
+
+3.6.1 IonQ Forte-1
+3.6.2 IBM ibm_boston
+
+
+3.7 Evaluation Metrics (LER 등)
+
+IV. Results (~2.5p)
+
+4.1 Simulation Performance
+4.2 IonQ Hardware Results (Color Code)
+4.3 IBM Hardware Results (Heavy-Hex Surface Code)
+4.4 Quantifying the Simulation-to-Hardware Gap ← 핵심 contribution, 표/그래프 필수
+4.5 Hybrid Decoder Performance
+
+V. Discussion (~0.75p)
+
+Architecture 별 transfer 성공/실패 패턴
+Platform 간 차이 (trapped-ion vs superconducting)
+Limitations
+
+VI. Conclusion and Future Work (~0.25p)
+
+핵심 기여 재정리
+Nighthawk 확장, 더 큰 distance 등 향후 계획
+
+References (~0.5p)
+Appendix (분량 여유 시)
+
+A. Depth-7 Circuit Details for Heavy-Hex Surface Code
+B. Stabilizer Derivation (GF(2))
+C. ML Architecture Hyperparameters
+
+
+m1 == m2: 96/100
+m1 != m2: 4/100
+
+Interpretation:
+  If no-reset works: m1==m2 should be ~100/100
+  If implicit reset: m1==m2 should be ~50/100 (m2 always 0, m1 random)
+  If decoherence dominates: m1==m2 somewhere between, e.g. 60-70/100
+
+
+Title: Quantifying the Simulation-to-Hardware Transfer Gap for 
+       Machine Learning Quantum Error Correction Decoders
+
+Abstract
+
+I. Introduction
+   - QEC, NISQ background, and the rise of ML decoders
+   - Industrial relevance: NVIDIA Ising (Chamberland et al., 2026) 
+     and the simulation-only evaluation gap
+   - Problem statement: the simulation-to-hardware transfer gap 
+     for ML QEC decoders has not been systematically quantified
+   - Contributions:
+       1. Cross-platform evaluation across three quantum processors 
+          (IonQ Forte-1, IBM Heron R3, IBM Nighthawk) covering 
+          trapped-ion and two superconducting topologies
+       2. Comparative study of eight ML decoder architectures 
+          (CNN, GCN, GCNII, GAT, APPNP, GNN, GraphTransformer, 
+          GraphMamba) against MWPM and No Correction baselines
+       3. Quantification of the sim-to-hardware gap, including 
+          an ~8x discrepancy between AerSim noise model and actual 
+          hardware on IBM Nighthawk
+       4. Hardware-level failure mode diagnosis identifying 
+          measurement crosstalk and ZZ coupling as platform-level 
+          (not pipeline-level) constraints
+   - Paper organization
+
+II. Background and Related Work
+   2.1 Quantum Error Correction
+   2.2 Color Code
+   2.3 Surface Code, Heavy-Hex Variant, and Square-Lattice Embedding
+   2.4 ML-based QEC Decoders
+       - Including Chamberland et al. (NVIDIA Ising, 2026): 
+         3D CNN pre-decoder, noise-learning architecture, 
+         simulation-only evaluation
+   2.5 The Simulation-to-Hardware Transfer Gap
+       - Literature gap: existing ML QEC decoder evaluations 
+         are predominantly simulation-based
+
+III. Methodology
+   3.1 Code Implementations
+       3.1.1 Color Code (d=3, 5) - IonQ Forte-1
+       3.1.2 Heavy-Hex Surface Code (d=3) - IBM Heron R3
+             (depth-7 circuit, Vezvaee et al.)
+       3.1.3 Surface Code (d=3, 5) - IBM Nighthawk
+             (45-degree embedding, SWAP=0, sliding-window 
+             best-patch selection on 12x10 grid)
+   3.2 Training Data Generation via Stim
+       - X/Z stabilizer convention alignment with Qiskit
+   3.3 ML Decoder Architectures (eight models)
+   3.4 Baselines: No Correction and MWPM
+   3.5 Hybrid MWPM+ML Decoder
+       - Note: Unlike pre-decoder architectures (e.g., NVIDIA Ising), 
+         our hybrid scheme applies MWPM first and routes residual 
+         syndromes to ML
+   3.6 Hardware Experiment Setup
+       3.6.1 IonQ Forte-1
+             (REST API mid-circuit measurement constraint, 
+             AerSim + public noise model fallback for d=5)
+       3.6.2 IBM ibm_boston (Heron R3)
+       3.6.3 IBM ibm_miami (Nighthawk)
+             (XOR tracking via cumulative-to-per-round conversion 
+             at HW boundary; basis_gates restriction; 
+             DD disabled in this study)
+   3.7 Evaluation Metrics
+       - Logical Error Rate (LER), 5 independent runs x 1000 shots 
+         per backend, 3 noise profiles
+
+IV. Results
+   4.1 Simulation Performance
+       - Clean-sim MWPM LER=0 verified for both d=3 and d=5
+       - Subthreshold scaling confirmed (d=5 MWPM 0.0008 vs 
+         NoCorr 0.0350 at dp~0.001)
+   4.2 IonQ Hardware Results - Color Code
+       - GraphTransformer and GraphMamba consistently outperform 
+         NoCorr by 4-15% relative LER improvement
+       - GCN, GAT, GNN degraded or collapsed
+       - Hybrid MWPM+ML shows no statistically significant 
+         improvement over MWPM alone (null result)
+   4.3 IBM Hardware Results
+       4.3.1 IBM Heron R3 - Heavy-Hex Surface Code
+             - Naive square surface code transpile: depth ~673 
+               (impractical)
+             - With heavy-hex code: MWPM LER=0.428 > NoCorr LER=0.224 
+               (MWPM disabled)
+             - ML decoders outperform NoCorr across runs; one 
+               outlier run showed an unusually large GNN gain 
+               (run 4 of 5), which is reported but not relied 
+               upon in the aggregate analysis
+             - Diagnosis: heavy-hex gauge structure violates the 
+               syndrome-graph assumptions of classical matching 
+               decoders, while ML decoders remain functional
+             - Finding: ML decoders can transfer to hardware in 
+               topology regimes where classical decoders cannot
+       4.3.2 IBM Nighthawk - Square-Lattice Surface Code
+             - d=3: NoCorr=0.467, MWPM=0.455, ML 0.45-0.53
+             - d=5: NoCorr=0.367, MWPM=0.285-0.312 (~22% improvement), 
+               ML 0.35-0.63
+             - d=5 patch quality limited (avg_cx_error 1.89e-2, 
+               ~8x worse than d=3 patch)
+   4.4 Quantifying the Simulation-to-Hardware Gap
+       - AerSim with ibm_miami noise model (d=3 NoCorr=0.057) 
+         versus actual hardware (d=3 NoCorr=0.467): ~8x gap
+       - Cross-platform comparison table
+       - The gap is multi-dimensional: topology, noise level, 
+         and architecture all contribute
+   4.5 Failure Mode Diagnosis (Nighthawk)
+       - Single-qubit no-reset protocol verified (96/100 consistency)
+       - Multi-qubit round-1 X-stabilizer P(=1) ~ 0.50: 
+         complete decoherence
+       - Attribution: measurement crosstalk + ZZ coupling on the 
+         dense 4-neighbor lattice in preview calibration state
+       - Effective noise approximately 8x worse than publicized 
+         calibration
+
+V. Discussion
+   - Architecture-level patterns: GraphTransformer and GraphMamba 
+     transfer most reliably; GCN and GAT collapse on hardware
+   - Platform-level vs pipeline-level constraints: heavy-hex 
+     topology and Nighthawk crosstalk are hardware-level, 
+     not algorithmic
+   - Heavy-hex topology constrains classical decoder applicability 
+     while leaving ML decoder applicability intact - a partial 
+     empirical confirmation of the architectural premise of 
+     ML pre-decoder proposals (e.g., NVIDIA Ising)
+   - However, Nighthawk shows ML decoder advantage does not extend 
+     to regimes dominated by hardware noise floors
+   - Implication: ML decoders are bounded by hardware-level noise, 
+     not algorithmic ceiling
+   - Note on the IBM Heron R3 GNN outlier run: single-run anomaly 
+     reported for completeness; aggregate ML advantage holds 
+     independent of this run
+   - Limitations
+
+VI. Conclusion and Future Work
+   - Recap of contributions
+   - Future: multi-qubit no-reset crosstalk verification, 
+     calibration-time variance study, larger code distances, 
+     additional hardware platforms
+
+References
+
+Appendix
+   A. Depth-7 Heavy-Hex Circuit Details
+   B. Stim - Qiskit Stabilizer Convention Alignment
+   C. Nighthawk 45-degree Embedding Geometry
+   D. ML Architecture Hyperparameters
+   E. Per-Run Hardware Results (including IBM Heron R3 
+      Run 4 GNN outlier breakdown)

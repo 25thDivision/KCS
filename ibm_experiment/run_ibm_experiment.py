@@ -235,7 +235,7 @@ def run_pipeline(config: dict):
             noise_list = json.load(f)["experiment"]["active_noise"]
 
     # DD 옵션
-    dd_sequence = backend_cfg.get("dd_sequence", "XY4") \
+    dd_sequence = backend_cfg.get("dd_sequence", "XX4") \
         if backend_cfg.get("dynamical_decoupling", False) else None
 
     results = []
@@ -280,6 +280,7 @@ def run_pipeline(config: dict):
             shots=backend_cfg["shots"],
             initial_layout=initial_layout,
             dd_sequence=dd_sequence,
+            optimization_level=backend_cfg.get("optimization_level", 2),
         )
 
         print(f"\n>>> [Step 4] Extracting syndromes and data states...")

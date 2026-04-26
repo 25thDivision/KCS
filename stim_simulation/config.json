@@ -136,7 +136,7 @@
             "enabled": true,
             "type": "graph",
             "use_adj": false,
-            "batch_size": 2048,
+            "batch_size": 1024,
             "lr": 0.0001,
             "loss_weight": "sqrt",
             "loss_type": "bce",
