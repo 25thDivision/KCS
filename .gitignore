@@ -19,8 +19,16 @@ dataset/
 keys.json
 
 # 로그 파일 무시
+logs/
 *.log
 *.out
 
 # 레거시 무시
 legacy/
+final_results_/
+final_results__/
+
+# 용량이 큰 파일 무시 --> 결과 파일들이므로 이는 final_results 폴더에서 확인
+ibm_experiment/results/
+ionq_experiment/results/
+stim_simulation/test_results_(legacy)/

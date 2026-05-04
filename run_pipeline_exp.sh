@@ -6,7 +6,7 @@ run_sequential() {
     local platform=$1
     local backend=$2
     local instance=$3
-    local runs=("1st" "2nd" "3rd" "4th" "5th")
+    local runs=("1st" "2nd" "3rd" "4th" "5th" "6th" "7th" "8th" "9th" "10th")
     local models="CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba"
 
     # IBM 코드 타입: miami(Nighthawk)는 surface, 나머지(heavy-hex)는 heavyhex

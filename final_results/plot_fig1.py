@@ -67,9 +67,9 @@ def panel_subtitle(ax, text):
             color=C['title'], style='italic')
 
 
-def panel_caption(ax, text):
+def panel_caption(ax, text, y=0.50):
     """Bottom-center small italic caption, placed inside panel area."""
-    ax.text(PANEL_W / 2, 0.50, text,
+    ax.text(PANEL_W / 2, y, text,
             ha='center', va='bottom', fontsize=14,
             color=C['title'], style='italic')
 
@@ -131,24 +131,40 @@ def draw_panel_a(ax):
     ax.text(x - 0.05, y_leg, 'faces',
             va='center', fontsize=16, color=C['title'])
 
-    # 6 data qubit positions
-    coords = [(2.7, 4.10), (1.7, 2.85), (3.7, 2.85),
-              (0.7, 1.60), (2.7, 1.60), (4.7, 1.60)]
-    cd0, cd1, cd2, cd3, cd4, cd5 = coords
+    # 7 data qubit positions (Steane octagonal layout — balanced aspect)
+    q0 = (2.7, 4.40)   # top apex
+    q1 = (1.10, 3.50)  # upper-left
+    q3 = (4.30, 3.50)  # upper-right
+    q2 = (2.7, 2.65)   # center (shared by all 3 faces)
+    q4 = (1.10, 1.80)  # lower-left
+    q6 = (4.30, 1.80)  # lower-right
+    q5 = (2.7, 0.95)   # bottom apex
+    coords = [q0, q1, q2, q3, q4, q5, q6]
 
-    # Plaquettes (R/G/B triangles)
-    ax.add_patch(Polygon([cd0, cd1, cd2], closed=True,
+    # Weight-4 plaquettes (R/G/B quadrilaterals)
+    ax.add_patch(Polygon([q0, q1, q2, q3], closed=True,
                          facecolor=C['R'], alpha=0.22,
                          edgecolor=C['R'], linewidth=0.8))
-    ax.add_patch(Polygon([cd1, cd3, cd4], closed=True,
+    ax.add_patch(Polygon([q1, q4, q5, q2], closed=True,
                          facecolor=C['G'], alpha=0.22,
                          edgecolor=C['G'], linewidth=0.8))
-    ax.add_patch(Polygon([cd2, cd4, cd5], closed=True,
+    ax.add_patch(Polygon([q3, q2, q5, q6], closed=True,
                          facecolor=C['B'], alpha=0.22,
                          edgecolor=C['B'], linewidth=0.8))
 
     for x_, y_ in coords:
         add_data(ax, x_, y_)
+
+    # # Anchor labels
+    # ax.text(q0[0], q0[1] + 0.22, '$q_0$', ha='center', va='bottom',
+    #         fontsize=12, color=C['title'])
+    # ax.text(q3[0] + 0.22, q3[1], '$q_3$', ha='left', va='center',
+    #         fontsize=12, color=C['title'])
+    # ax.text(q4[0] - 0.22, q4[1], '$q_4$', ha='right', va='center',
+    #         fontsize=12, color=C['title'])
+
+    panel_caption(ax, '7 data + 3 ancillas on faces (R,G,B)',
+                  y=0.20)
 
 
 # ============================================================
@@ -173,7 +189,8 @@ def draw_panel_b(ax):
             color=C['title'])
 
     # Data qubits 3x3 grid (shifted +0.20 in x to center within panel)
-    rows_y = {0: 4.10, 1: 2.85, 2: 1.60}
+    # Lattice flipped vertically: row 0 at bottom, row 2 at top
+    rows_y = {0: 1.60, 1: 2.85, 2: 4.10}
     cols_x = {0: 1.15, 1: 2.70, 2: 4.25}
     hd = {(r, c): (cols_x[c], rows_y[r]) for r in rows_y for c in cols_x}
 
@@ -182,18 +199,18 @@ def draw_panel_b(ax):
     bridges_R = {r: (3.475, rows_y[r]) for r in rows_y}   # cols 1-2
 
     # Ancillas — heavy-hex constraint (alternating cols per row gap)
-    hzL = (1.15, 3.475)   # row 0-1, col 0
-    hzR = (4.25, 3.475)   # row 0-1, col 2
-    hxC = (2.70, 2.225)   # row 1-2, col 1
+    hzL = (1.15, 2.225)   # row 0-1 gap, col 0  (now lower half)
+    hzR = (4.25, 2.225)   # row 0-1 gap, col 2  (now lower half)
+    hxC = (2.70, 3.475)   # row 1-2 gap, col 1  (now upper half)
 
-    # Plaquette tints (drawn first)
-    ax.add_patch(Rectangle((0.85, 2.55), 2.85 - 0.65, 4.40 - 2.55,
-                           facecolor=C['Zanc'], alpha=0.18, zorder=1))
-    ax.add_patch(Rectangle((2.35, 2.55), 4.35 - 2.15, 4.40 - 2.55,
-                           facecolor=C['Zanc'], alpha=0.18, zorder=1))
+    # Plaquette tints (drawn first) — Z bands now span the lower half
     ax.add_patch(Rectangle((0.85, 1.30), 2.85 - 0.65, 3.15 - 1.30,
-                           facecolor=C['Xanc'], alpha=0.20, zorder=1))
+                           facecolor=C['Zanc'], alpha=0.18, zorder=1))
     ax.add_patch(Rectangle((2.35, 1.30), 4.35 - 2.15, 3.15 - 1.30,
+                           facecolor=C['Zanc'], alpha=0.18, zorder=1))
+    ax.add_patch(Rectangle((0.85, 2.55), 2.85 - 0.65, 4.40 - 2.55,
+                           facecolor=C['Xanc'], alpha=0.20, zorder=1))
+    ax.add_patch(Rectangle((2.35, 2.55), 4.35 - 2.15, 4.40 - 2.55,
                            facecolor=C['Xanc'], alpha=0.20, zorder=1))
 
     # Heavy-hex edges
@@ -219,17 +236,17 @@ def draw_panel_b(ax):
     add_anc(ax, *hzR, kind='Z')
     add_anc(ax, *hxC, kind='X')
 
-    # Plaquette labels
-    ax.text(1.95, 3.50, '$Z_1$', ha='center', va='center',
+    # Plaquette labels (Z labels now in the lower band, X labels in the upper band)
+    ax.text(1.95, 2.20, '$Z_1$', ha='center', va='center',
             fontsize=16, color=C['Zanc'])
-    ax.text(3.45, 3.50, '$Z_2$', ha='center', va='center',
+    ax.text(3.45, 2.20, '$Z_2$', ha='center', va='center',
             fontsize=16, color=C['Zanc'])
-    ax.text(1.95, 2.20, '$X_1$', ha='center', va='center',
+    ax.text(1.95, 3.50, '$X_1$', ha='center', va='center',
             fontsize=16, color=C['Xanc'])
-    ax.text(3.45, 2.20, '$X_2$', ha='center', va='center',
+    ax.text(3.45, 3.50, '$X_2$', ha='center', va='center',
             fontsize=16, color=C['Xanc'])
 
-    panel_caption(ax, '9 data + 6 bridges + 3 ancillas')
+    panel_caption(ax, '9 data + 6 bridges + 3 ancillas', y=0.20)
 
 
 # ============================================================
@@ -253,54 +270,63 @@ def draw_panel_c(ax):
     ax.text(3.00, y_leg, 'boundary (weight-2)',
             va='center', fontsize=16, color=C['title'])
 
-    # 9 data on 3x3 grid
-    rows_y = {0: 1.85, 1: 3.00, 2: 4.15}
+    # 9 data on 3x3 grid (q0 at top-left, row-major)
+    rows_y = {0: 4.15, 1: 3.00, 2: 1.85}   # row 0 = top, row 2 = bottom
     cols_x = {0: 1.30, 1: 2.70, 2: 4.10}
     sd = {(r, c): (cols_x[c], rows_y[r]) for r in rows_y for c in cols_x}
 
-    # Bulk ancilla positions (centers of bulk plaquettes)
-    sz1 = (2.00, 3.575)   # bulk Z, top-left cell
-    sz2 = (3.40, 2.425)   # bulk Z, bot-right cell
-    sx1 = (3.40, 3.575)   # bulk X, top-right cell
-    sx2 = (2.00, 2.425)   # bulk X, bot-left cell
+    # Bulk ancillas (centers of the 4 bulk plaquettes)
+    #   X-bulk top-LEFT cell : [q0,q1,q4,q3]
+    #   Z-bulk top-RIGHT cell: [q1,q2,q5,q4]
+    #   Z-bulk bot-LEFT cell : [q3,q4,q7,q6]
+    #   X-bulk bot-RIGHT cell: [q4,q5,q8,q7]
+    sx1 = (2.00, 3.575)   # X-bulk top-LEFT
+    sz1 = (3.40, 3.575)   # Z-bulk top-RIGHT
+    sz2 = (2.00, 2.425)   # Z-bulk bot-LEFT
+    sx2 = (3.40, 2.425)   # X-bulk bot-RIGHT
 
-    # Boundary ancilla positions (just outside grid)
-    sz3 = (0.65, 3.575)   # left edge Z (between sd10 and sd20)
-    sz4 = (4.75, 2.425)   # right edge Z (between sd01 and sd11)
-    sx3 = (3.40, 4.70)    # top edge X (between sd21 and sd22)
-    sx4 = (2.00, 1.30)    # bottom edge X (between sd00 and sd01)
+    # Boundary ancillas (just outside grid)
+    #   X-bnd LEFT  (q3,q6) : left edge bottom half
+    #   X-bnd RIGHT (q2,q5) : right edge top half
+    #   Z-bnd TOP   (q0,q1) : top edge left half
+    #   Z-bnd BOT   (q7,q8) : bottom edge right half
+    sx_L = (cols_x[0] - 0.65, (rows_y[1] + rows_y[2]) / 2)   # (0.65, 2.425)
+    sx_R = (cols_x[2] + 0.65, (rows_y[0] + rows_y[1]) / 2)   # (4.75, 3.575)
+    sz_T = ((cols_x[0] + cols_x[1]) / 2, rows_y[0] + 0.65)   # (2.00, 4.80)
+    sz_B = ((cols_x[1] + cols_x[2]) / 2, rows_y[2] - 0.65)   # (3.40, 1.20)
 
     # Bulk plaquette tints (squares around the 4 cells)
-    ax.add_patch(Polygon([sd[(1, 0)], sd[(2, 0)], sd[(2, 1)], sd[(1, 1)]],
-                         facecolor=C['Zanc'], alpha=0.20, zorder=1))
-    ax.add_patch(Polygon([sd[(0, 1)], sd[(1, 1)], sd[(1, 2)], sd[(0, 2)]],
-                         facecolor=C['Zanc'], alpha=0.20, zorder=1))
-    ax.add_patch(Polygon([sd[(1, 1)], sd[(2, 1)], sd[(2, 2)], sd[(1, 2)]],
-                         facecolor=C['Xanc'], alpha=0.20, zorder=1))
-    ax.add_patch(Polygon([sd[(0, 0)], sd[(1, 0)], sd[(1, 1)], sd[(0, 1)]],
-                         facecolor=C['Xanc'], alpha=0.20, zorder=1))
+    ax.add_patch(Polygon([sd[(0, 0)], sd[(0, 1)], sd[(1, 1)], sd[(1, 0)]],
+                         facecolor=C['Xanc'], alpha=0.20, zorder=1))   # top-LEFT (X)
+    ax.add_patch(Polygon([sd[(0, 1)], sd[(0, 2)], sd[(1, 2)], sd[(1, 1)]],
+                         facecolor=C['Zanc'], alpha=0.20, zorder=1))   # top-RIGHT (Z)
+    ax.add_patch(Polygon([sd[(1, 0)], sd[(1, 1)], sd[(2, 1)], sd[(2, 0)]],
+                         facecolor=C['Zanc'], alpha=0.20, zorder=1))   # bot-LEFT (Z)
+    ax.add_patch(Polygon([sd[(1, 1)], sd[(1, 2)], sd[(2, 2)], sd[(2, 1)]],
+                         facecolor=C['Xanc'], alpha=0.20, zorder=1))   # bot-RIGHT (X)
 
-    # Boundary D-shape semicircles (Wedge in matplotlib)
-    # Left Z-bnd: half-disk pointing LEFT, between sd10 and sd20
+    # Boundary D-shape semicircles (Wedge), centered on the edge midpoint,
+    # bulging outward away from the grid.
+    # X-bnd LEFT: between sd10 and sd20, points LEFT
     cx, cy = (sd[(1, 0)][0] + sd[(2, 0)][0]) / 2, (sd[(1, 0)][1] + sd[(2, 0)][1]) / 2
     ax.add_patch(Wedge((cx, cy), 0.575, 90, 270,
-                       facecolor=C['Zanc'], alpha=0.20,
-                       edgecolor='#1f3a55', linewidth=1.2, zorder=2))
-    # Right Z-bnd: half-disk pointing RIGHT, between sd01 and sd11
+                       facecolor=C['Xanc'], alpha=0.20,
+                       edgecolor='#7a3838', linewidth=1.2, zorder=2))
+    # X-bnd RIGHT: between sd02 and sd12, points RIGHT
     cx, cy = (sd[(0, 2)][0] + sd[(1, 2)][0]) / 2, (sd[(0, 2)][1] + sd[(1, 2)][1]) / 2
     ax.add_patch(Wedge((cx, cy), 0.575, -90, 90,
+                       facecolor=C['Xanc'], alpha=0.20,
+                       edgecolor='#7a3838', linewidth=1.2, zorder=2))
+    # Z-bnd TOP: between sd00 and sd01, points UP
+    cx, cy = (sd[(0, 0)][0] + sd[(0, 1)][0]) / 2, (sd[(0, 0)][1] + sd[(0, 1)][1]) / 2
+    ax.add_patch(Wedge((cx, cy), 0.700, 0, 180,
                        facecolor=C['Zanc'], alpha=0.20,
                        edgecolor='#1f3a55', linewidth=1.2, zorder=2))
-    # Top X-bnd: half-disk pointing UP, between sd21 and sd22
+    # Z-bnd BOT: between sd21 and sd22, points DOWN
     cx, cy = (sd[(2, 1)][0] + sd[(2, 2)][0]) / 2, (sd[(2, 1)][1] + sd[(2, 2)][1]) / 2
-    ax.add_patch(Wedge((cx, cy), 0.700, 0, 180,
-                       facecolor=C['Xanc'], alpha=0.20,
-                       edgecolor='#7a3838', linewidth=1.2, zorder=2))
-    # Bottom X-bnd: half-disk pointing DOWN, between sd00 and sd01
-    cx, cy = (sd[(0, 0)][0] + sd[(0, 1)][0]) / 2, (sd[(0, 0)][1] + sd[(0, 1)][1]) / 2
     ax.add_patch(Wedge((cx, cy), 0.700, 180, 360,
-                       facecolor=C['Xanc'], alpha=0.20,
-                       edgecolor='#7a3838', linewidth=1.2, zorder=2))
+                       facecolor=C['Zanc'], alpha=0.20,
+                       edgecolor='#1f3a55', linewidth=1.2, zorder=2))
 
     # Square-grid lattice edges
     for r in rows_y:
@@ -313,15 +339,15 @@ def draw_panel_c(ax):
     # Nodes
     for pos in sd.values():
         add_data(ax, *pos)
-    add_anc(ax, *sz1, kind='Z'); add_anc(ax, *sz2, kind='Z')
     add_anc(ax, *sx1, kind='X'); add_anc(ax, *sx2, kind='X')
+    add_anc(ax, *sz1, kind='Z'); add_anc(ax, *sz2, kind='Z')
     # Boundary ancillas (open ring)
-    add_anc(ax, *sz3, kind='Z', boundary=True)
-    add_anc(ax, *sz4, kind='Z', boundary=True)
-    add_anc(ax, *sx3, kind='X', boundary=True)
-    add_anc(ax, *sx4, kind='X', boundary=True)
+    add_anc(ax, *sx_L, kind='X', boundary=True)
+    add_anc(ax, *sx_R, kind='X', boundary=True)
+    add_anc(ax, *sz_T, kind='Z', boundary=True)
+    add_anc(ax, *sz_B, kind='Z', boundary=True)
 
-    panel_caption(ax, '9 data + 4 bulk ancillas + 4 boundary ancillas')
+    panel_caption(ax, '9 data + 4 bulk ancillas + 4 boundary ancillas', y=0.20)
 
 
 # ============================================================
@@ -332,35 +358,44 @@ def draw_panel_d(ax):
     panel_title(ax, 'd', 'IonQ Forte-1 (color code, $d=3$)')
     panel_subtitle(ax, 'trapped-ion, all-to-all (logical view)')
 
-    coords = [(2.7, 4.10), (1.7, 2.85), (3.7, 2.85),
-              (0.7, 1.60), (2.7, 1.60), (4.7, 1.60)]
-    id0, id1, id2, id3, id4, id5 = coords
+    # Steane octagonal layout (matches panel a — balanced aspect)
+    q0 = (2.7, 4.40)
+    q1 = (1.10, 3.50)
+    q3 = (4.30, 3.50)
+    q2 = (2.7, 2.65)
+    q4 = (1.10, 1.80)
+    q6 = (4.30, 1.80)
+    q5 = (2.7, 0.95)
+    coords = [q0, q1, q2, q3, q4, q5, q6]   # indexed by qubit number
 
-    # Plaquettes
-    ax.add_patch(Polygon([id0, id1, id2], closed=True,
+    # Weight-4 plaquettes
+    ax.add_patch(Polygon([q0, q1, q2, q3], closed=True,
                          facecolor=C['R'], alpha=0.20,
                          edgecolor=C['R'], linewidth=0.7))
-    ax.add_patch(Polygon([id1, id3, id4], closed=True,
+    ax.add_patch(Polygon([q1, q4, q5, q2], closed=True,
                          facecolor=C['G'], alpha=0.20,
                          edgecolor=C['G'], linewidth=0.7))
-    ax.add_patch(Polygon([id2, id4, id5], closed=True,
+    ax.add_patch(Polygon([q3, q2, q5, q6], closed=True,
                          facecolor=C['B'], alpha=0.20,
                          edgecolor=C['B'], linewidth=0.7))
 
-    # All-to-all dashed connections (cross-plaquette)
-    pairs = [(0, 3), (0, 4), (0, 5), (1, 5), (2, 3), (3, 5)]
+    # All-to-all dashed connections (cross-plaquette pairs)
+    pairs = [(0, 4), (0, 5), (0, 6), (1, 6), (3, 4), (4, 6)]
     for i, j in pairs:
         ax.plot([coords[i][0], coords[j][0]],
                 [coords[i][1], coords[j][1]],
                 color='black', alpha=0.35, linewidth=0.5,
                 linestyle='--', zorder=1)
 
-    # Data qubits + face-center ancillas
+    # Data qubits + face-center ancillas (centroid of each 4-qubit face)
     for x, y in coords:
         add_data(ax, x, y)
-    iaR = ((id0[0] + id1[0] + id2[0]) / 3, (id0[1] + id1[1] + id2[1]) / 3)
-    iaG = ((id1[0] + id3[0] + id4[0]) / 3, (id1[1] + id3[1] + id4[1]) / 3)
-    iaB = ((id2[0] + id4[0] + id5[0]) / 3, (id2[1] + id4[1] + id5[1]) / 3)
+    iaR = ((q0[0] + q1[0] + q2[0] + q3[0]) / 4,
+           (q0[1] + q1[1] + q2[1] + q3[1]) / 4)
+    iaG = ((q1[0] + q4[0] + q5[0] + q2[0]) / 4,
+           (q1[1] + q4[1] + q5[1] + q2[1]) / 4)
+    iaB = ((q3[0] + q2[0] + q5[0] + q6[0]) / 4,
+           (q3[1] + q2[1] + q5[1] + q6[1]) / 4)
     ax.add_patch(Circle(iaR, ANC_R, facecolor=C['R'], alpha=0.55,
                         edgecolor='black', linewidth=0.4, zorder=5))
     ax.add_patch(Circle(iaG, ANC_R, facecolor=C['G'], alpha=0.55,
@@ -368,7 +403,7 @@ def draw_panel_d(ax):
     ax.add_patch(Circle(iaB, ANC_R, facecolor=C['B'], alpha=0.55,
                         edgecolor='black', linewidth=0.4, zorder=5))
 
-    panel_caption(ax, '7 data + 6 ancillas')
+    panel_caption(ax, '7 data + 3 ancillas', y=0.20)
 
 
 # ============================================================
@@ -433,7 +468,7 @@ def draw_panel_e(ax):
                            facecolor='none', edgecolor='black',
                            linewidth=0.7, linestyle='--', zorder=3))
 
-    panel_caption(ax, '9 data + 6 bridges + 3 ancillas')
+    panel_caption(ax, '9 data + 6 bridges + 3 ancillas', y=0.20)
 
 
 # ============================================================
@@ -463,37 +498,41 @@ def draw_panel_f(ax):
             add_edge(ax, G[(r, c)], G[(r + 1, c)], alpha=0.35)
 
     # Patch (diamond, 45° rotated d=3 surface code)
-    # Data qubits on diamond vertices
+    # Data qubits on diamond vertices (lattice coords; user-spec coords + (1,2))
     data_cells = [(1, 4), (2, 3), (2, 5), (3, 2), (3, 4),
                   (3, 6), (4, 3), (4, 5), (5, 4)]
-    # Bulk ancillas (alternating Z/X)
-    bulk_Z = [(2, 4), (4, 4)]
-    bulk_X = [(3, 3), (3, 5)]
-    # Boundary ancillas (open rings, on diamond outer edges)
-    bnd_Z  = [(1, 5), (5, 3)]
-    bnd_X  = [(1, 3), (5, 5)]
+    # Bulk ancillas — match select_best_patch(d=3) output
+    #   X-bulk: top-center (1,2), bot-center (3,2)  → lattice (2,4), (4,4)
+    #   Z-bulk: left-center (2,1), right-center (2,3) → lattice (3,3), (3,5)
+    bulk_X = [(2, 4), (4, 4)]
+    bulk_Z = [(3, 3), (3, 5)]
+    # Boundary ancillas (open rings) — asymmetric placement from hardware patch
+    #   Z-bnd: top-left (0,1), bot-right (4,3)  → lattice (1,3), (5,5)
+    #   X-bnd: top-right (1,4), bot-left (3,0)  → lattice (2,6), (4,2)
+    bnd_Z = [(1, 3), (5, 5)]
+    bnd_X = [(2, 6), (4, 2)]
 
-    # Bulk plaquette tints (diamond shape sub-quadrants)
-    # Each is the square between 4 data qubits forming one cell
+    # Bulk plaquette tints (square between 4 data qubits forming each cell)
     cells = [
-        ((1, 4), (2, 3), (3, 4), (2, 5), C['Zanc']),   # top-Z
-        ((2, 3), (3, 2), (4, 3), (3, 4), C['Xanc']),   # left-X
-        ((2, 5), (3, 4), (4, 5), (3, 6), C['Xanc']),   # right-X
-        ((3, 4), (4, 3), (5, 4), (4, 5), C['Zanc']),   # bot-Z
+        ((1, 4), (2, 3), (3, 4), (2, 5), C['Xanc']),   # top X-bulk  (q11,q2,q22,q13)
+        ((2, 3), (3, 2), (4, 3), (3, 4), C['Zanc']),   # left Z-bulk (q11,q20,q31,q22)
+        ((2, 5), (3, 4), (4, 5), (3, 6), C['Zanc']),   # right Z-bulk(q13,q22,q33,q24)
+        ((3, 4), (4, 3), (5, 4), (4, 5), C['Xanc']),   # bot X-bulk  (q22,q31,q42,q33)
     ]
     for p1, p2, p3, p4, color in cells:
         ax.add_patch(Polygon([G[p1], G[p2], G[p3], G[p4]],
                              facecolor=color, alpha=0.20, zorder=1))
 
-    # Boundary D-shapes — semicircle on each diamond outer edge
-    # Each connects two adjacent diamond-vertex data qubits along an outer edge.
+    # Boundary D-shapes — one semicircle per occupied outer edge.
+    # Each pair (p1, p2) is two adjacent diamond-vertex data qubits;
+    # wedge bulges outward away from the diamond center G[(3,4)].
     bnd_edges = [
-        ((1, 4), (2, 3), 'X', 135),   # top-left outer edge — semicircle bulges UP-LEFT
-        ((1, 4), (2, 5), 'Z',  45),   # top-right
-        ((5, 4), (4, 3), 'Z', 225),   # bot-left
-        ((5, 4), (4, 5), 'X', 315),   # bot-right
+        ((1, 4), (2, 3), 'Z'),   # top-left  outer edge — Z (paired with bnd_Z (1,3))
+        ((2, 5), (3, 6), 'X'),   # top-right outer edge — X (paired with bnd_X (2,6))
+        ((3, 2), (4, 3), 'X'),   # bot-left  outer edge — X (paired with bnd_X (4,2))
+        ((5, 4), (4, 5), 'Z'),   # bot-right outer edge — Z (paired with bnd_Z (5,5))
     ]
-    for p1, p2, kind, bulge_deg in bnd_edges:
+    for p1, p2, kind in bnd_edges:
         a = np.array(G[p1])
         b = np.array(G[p2])
         mid = (a + b) / 2
@@ -543,7 +582,7 @@ def draw_panel_f(ax):
     rect.set_transform(Affine2D().rotate_deg_around(cx, cy, 45) + ax.transData)
     ax.add_patch(rect)
 
-    panel_caption(ax, '9 data + 8 ancillas')
+    panel_caption(ax, '9 data + 4 bulk ancillas + 4 boundary ancillas', y=0.20)
 
 
 # ============================================================
