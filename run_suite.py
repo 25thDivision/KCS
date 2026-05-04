@@ -299,6 +299,9 @@ def do_experiment(args):
             log[0] = f"{args.backend}"
         if platform == "ibm" and args.instance:
             cmd += ["-i"] + [args.instance]
+        if platform == "ibm" and args.code:
+            cmd += ["--code", args.code[0]]
+            log.append(args.code[0])
         cmd += ["-n"] + noise_list
 
         run_cmd(cmd, cwd=ROOT_DIR, log=f"experiment_{'_'.join(log)}.log")

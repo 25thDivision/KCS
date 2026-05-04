@@ -1,5 +1,5 @@
 #!/bin/bash
-PIPELINE_ID=ionq_more_runs_$(date +%Y%m%d_%H%M%S)
+PIPELINE_ID=Curiousity_more_runs_$(date +%Y%m%d_%H%M%S)
 
 # 각 프로세서를 독립적으로 5회 순차 실행, 프로세서 간은 병렬
 run_sequential() {
@@ -9,12 +9,22 @@ run_sequential() {
     local runs=("1st" "2nd" "3rd" "4th" "5th")
     local models="CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba"
 
+    # IBM 코드 타입: miami(Nighthawk)는 surface, 나머지(heavy-hex)는 heavyhex
+    local code_type=""
+    if [ "$platform" == "ibm" ]; then
+        if [ "$backend" == "ibm_miami" ]; then
+            code_type="surface_code"
+        else
+            code_type="heavyhex_surface_code"
+        fi
+    fi
+
     for run in "${runs[@]}"; do
         echo "============================================"
         echo "[${platform}/${backend:-default}/${instance:-default}] ${run} 시작"
         echo "============================================"
         if [ "$platform" == "ibm" ]; then
-            python3 run_suite.py --id $PIPELINE_ID/$run --experiment ibm -b $backend -i $instance -m $models
+            python3 run_suite.py --id $PIPELINE_ID/$run --experiment ibm -b $backend -i $instance -m $models -c $code_type
         else
             python3 run_suite.py --id $PIPELINE_ID/$run --experiment ionq -m $models
         fi
@@ -25,10 +35,10 @@ run_sequential() {
 }
 
 # 3개 프로세서 병렬, 각각 내부적으로 5회 순차
-# run_sequential ibm ibm_boston Yonsei_internal &
-# run_sequential ibm ibm_pittsburgh &
-# run_sequential ibm ibm_aachen Yonsei_internal-eu &
-# run_sequential ibm ibm_miami Yonsei_internal &
+run_sequential ibm ibm_boston Yonsei_internal &
+run_sequential ibm ibm_pittsburgh Yonsei_internal &
+run_sequential ibm ibm_aachen Yonsei_internal-eu &
+run_sequential ibm ibm_miami Yonsei_internal &
 run_sequential ionq &
 
 wait

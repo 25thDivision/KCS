@@ -26,6 +26,7 @@ from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
 from decoders.ml_decoder_adapter import MLDecoderAdapter
 from decoders.hybrid_decoder import HybridMWPMDecoder
+from decoders.hybrid_ml_mwpm_decoder import HybridMLMWPMDecoder
 from evaluation.logical_error_rate import LogicalErrorRateEvaluator
 from logger import log_to_file
 from paths import ProjectPaths
@@ -308,6 +309,42 @@ def run_pipeline(config: dict):
                             except Exception as e:
                                 print(f"        ⚠️ Hybrid MWPM+{model_name} failed: {e}")
                                 log_to_file(f"IonQ | MWPM+{model_name} | d={distance}, p={p}, {err_type}, {noise} | FAILED: {e}")
+
+                        # Hybrid ML+MWPM (역순)
+                        #   - ML이 먼저, residual을 MWPM Restriction으로 정정
+                        try:
+                            ml_mwpm = HybridMLMWPMDecoder(distance=distance)
+                            ml_mwpm_corrections = ml_mwpm.decode(
+                                data_states=data_states,
+                                ml_corrections=corrections,
+                            )
+                            ml_mwpm_eval = evaluator.evaluate(
+                                data_states, ml_mwpm_corrections, shot_counts)
+                            ml_mwpm_ler = ml_mwpm_eval["logical_error_rate"]
+                            print(f"        ✅ Hybrid {model_name}+MWPM: "
+                                  f"LER={ml_mwpm_ler:.4f} "
+                                  f"({ml_mwpm_eval['logical_errors']}/{ml_mwpm_eval['total_shots']})")
+
+                            results.append({
+                                "model_name": f"{model_name}+MWPM",
+                                "distance": distance,
+                                "num_rounds": num_rounds,
+                                "noise_model": backend_cfg["noise_model"],
+                                "shots": backend_cfg["shots"],
+                                "stim_error_rate": p,
+                                "stim_error_type": err_type,
+                                "weight_noise": noise,
+                                "logical_error_rate": ml_mwpm_ler,
+                                "total_shots": ml_mwpm_eval["total_shots"],
+                                "logical_errors": ml_mwpm_eval["logical_errors"],
+                            })
+
+                            send_discord_alert(f"{model_name}+MWPM", distance, p, err_type,
+                                               ml_mwpm_ler, ml_mwpm_eval["total_shots"],
+                                               backend_cfg["noise_model"], noise)
+                        except Exception as e:
+                            print(f"        ⚠️ Hybrid {model_name}+MWPM failed: {e}")
+                            log_to_file(f"IonQ | {model_name}+MWPM | d={distance}, p={p}, {err_type}, {noise} | FAILED: {e}")
 
     return results
 

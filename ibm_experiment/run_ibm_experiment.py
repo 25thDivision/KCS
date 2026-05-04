@@ -30,6 +30,7 @@ from extractors.syndrome_extractor import SyndromeExtractor
 from extractors.stim_compat import StimFormatConverter
 from decoders.ml_decoder_adapter import MLDecoderAdapter
 from decoders.hybrid_decoder import HybridMWPMDecoder
+from decoders.hybrid_ml_mwpm_decoder import HybridMLMWPMDecoder
 from evaluation.logical_error_rate import LogicalErrorRateEvaluator
 from logger import log_to_file
 from paths import ProjectPaths
@@ -369,6 +370,7 @@ def run_pipeline(config: dict):
 
             # Per-noise MWPM for surface_code
             mwpm_per_noise = None
+            mwpm_corr_for_hybrid = None
             if "MWPM" in baselines and code_type == "surface_code":
                 try:
                     mwpm_per_noise = resolve_mwpm_decoder(
@@ -376,6 +378,7 @@ def run_pipeline(config: dict):
                     mwpm_corr = run_mwpm_baseline(
                         code_type, mwpm_per_noise, syndromes, data_states,
                         converter)
+                    mwpm_corr_for_hybrid = mwpm_corr
                     mwpm_eval = evaluator.evaluate(
                         data_states, mwpm_corr, shot_counts)
                     mwpm_ler = mwpm_eval["logical_error_rate"]
@@ -469,16 +472,31 @@ def run_pipeline(config: dict):
                             "logical_errors": eval_result["logical_errors"],
                         })
 
-                        # Hybrid MWPM+ML (only when legacy heavyhex decoder exists)
-                        if mwpm_available and code_type == "heavyhex_surface_code":
+                        # Hybrid MWPM+ML
+                        #   - heavyhex: 내장 MWPMHeavyHexDecoder 사용 (legacy 동작 유지)
+                        #   - surface_code: 위에서 계산한 mwpm_corr를 주입
+                        run_hybrid = mwpm_available and (
+                            code_type == "heavyhex_surface_code"
+                            or (code_type == "surface_code"
+                                and mwpm_corr_for_hybrid is not None)
+                        )
+                        if run_hybrid:
                             try:
                                 hybrid = HybridMWPMDecoder(
                                     distance=distance,
                                     ml_decoder=decoder,
                                     converter=converter,
                                     model_type=model_type,
+                                    code_type=code_type,
                                 )
-                                hybrid_corrections = hybrid.decode(syndromes, data_states)
+                                hybrid_mwpm_input = (
+                                    mwpm_corr_for_hybrid
+                                    if code_type == "surface_code" else None
+                                )
+                                hybrid_corrections = hybrid.decode(
+                                    syndromes, data_states,
+                                    mwpm_corrections=hybrid_mwpm_input,
+                                )
                                 hybrid_eval = evaluator.evaluate(
                                     data_states, hybrid_corrections, shot_counts)
                                 hybrid_ler = hybrid_eval["logical_error_rate"]
@@ -506,6 +524,47 @@ def run_pipeline(config: dict):
                                 print(f"        ⚠️ Hybrid MWPM+{model_name} failed: {e}")
                                 log_to_file(f"IBM | MWPM+{model_name} | d={distance}, p={p}, "
                                             f"{err_type}, {noise} | FAILED: {e}")
+
+                        # Hybrid ML+MWPM (역순)
+                        #   - ML이 먼저, residual을 MWPM으로 정정
+                        #   - heavyhex_surface_code, surface_code 모두 지원 (MWPM 가용 여부 무관)
+                        try:
+                            ml_mwpm = HybridMLMWPMDecoder(
+                                distance=distance,
+                                converter=converter,
+                                code_type=code_type,
+                            )
+                            ml_mwpm_corrections = ml_mwpm.decode(
+                                data_states=data_states,
+                                ml_corrections=corrections,
+                            )
+                            ml_mwpm_eval = evaluator.evaluate(
+                                data_states, ml_mwpm_corrections, shot_counts)
+                            ml_mwpm_ler = ml_mwpm_eval["logical_error_rate"]
+                            print(f"        ✅ Hybrid {model_name}+MWPM: "
+                                  f"LER={ml_mwpm_ler:.4f} "
+                                  f"({ml_mwpm_eval['logical_errors']}/{ml_mwpm_eval['total_shots']})")
+                            results.append({
+                                "model_name": f"{model_name}+MWPM",
+                                "distance": distance,
+                                "num_rounds": num_rounds,
+                                "backend": BACKEND,
+                                "shots": backend_cfg["shots"],
+                                "stim_error_rate": p,
+                                "stim_error_type": err_type,
+                                "weight_noise": noise,
+                                "logical_error_rate": ml_mwpm_ler,
+                                "total_shots": ml_mwpm_eval["total_shots"],
+                                "logical_errors": ml_mwpm_eval["logical_errors"],
+                            })
+                            send_discord_alert(f"{model_name}+MWPM", distance, p,
+                                               err_type, ml_mwpm_ler,
+                                               ml_mwpm_eval["total_shots"],
+                                               BACKEND, noise)
+                        except Exception as e:
+                            print(f"        ⚠️ Hybrid {model_name}+MWPM failed: {e}")
+                            log_to_file(f"IBM | {model_name}+MWPM | d={distance}, p={p}, "
+                                        f"{err_type}, {noise} | FAILED: {e}")
 
     return results
 
