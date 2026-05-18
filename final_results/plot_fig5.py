@@ -31,9 +31,9 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
-OUT_STEM   = 'fig5_sim2real_font_changed'
+OUT_STEM   = 'fig5_sim2real'
 
-Y_CLIP     = (-120, 40)
+Y_CLIP     = (-120, 55)
 GOOD_COLOR = '#e8f4ea'
 BAD_COLOR  = '#fbeceb'
 
@@ -78,6 +78,11 @@ def draw_box(ax, df):
                     color='white', lw=1.8, zorder=5, solid_capstyle='butt')
             ax.plot([x0 - w/2, x0 + w/2], [med, med],
                     color='black', lw=0.5, alpha=0.8, zorder=6, solid_capstyle='butt')
+            # Platform marker overlay (centered on box at median)
+            ax.scatter(x0, med,
+                       marker=PLATFORM_MARKER[r['platform']],
+                       color=color, s=110 if is_d5 else 65,
+                       edgecolors='white', linewidth=1.0, zorder=7)
 
         if clipped_any:
             ax.annotate('', xy=(x0, Y_CLIP[0] + 1.5),
@@ -126,23 +131,23 @@ for ax, nk in zip(axes, NOISE_ORDER):
     title = rf"$p_{{\mathrm{{dp}}}} = {pdp}$"
     if n_clip > 0:
         title += f"   ({n_clip} runs below axis)"
-    ax.set_title(title, fontsize=20)
-    ax.set_xlabel('Simulation ECR (%)', fontsize=20)
-    ax.tick_params(axis='both', labelsize=18)
+    ax.set_title(title, fontsize=21)
+    ax.set_xlabel('Simulation ECR (%)', fontsize=21)
+    ax.tick_params(axis='both', labelsize=19)
     ax.grid(True, alpha=0.2, zorder=1)
     ax.set_xlim(-3, 100)
     ax.set_ylim(Y_CLIP)
 
     if ax is axes[0]:
         ax.text(2, 20, 'improvement\nover NoCorr',
-                fontsize=18, color='#2a7a36', alpha=0.9, style='italic',
+                fontsize=19, color='#2a7a36', alpha=0.9, style='italic',
                 va='center')
         ax.text(2, -55, 'worse than\nNoCorr',
-                fontsize=18, color='#9b2a24', alpha=0.9, style='italic')
+                fontsize=19, color='#9b2a24', alpha=0.9, style='italic')
 
 axes[0].set_ylabel(
     r'Hardware ECR (%) $= 100 \cdot (1 - \mathrm{LER}_{\mathrm{ML}}/\mathrm{LER}_{\mathrm{NoCorr}})$',
-    fontsize=20)
+    fontsize=21)
 
 
 # ---------- Legend ----------
@@ -160,16 +165,16 @@ dist_handles = [Line2D([0], [0], marker='s', linestyle='', color='lightgray',
 
 fig.legend(handles=dec_handles, title='Decoder',
            loc='center left', bbox_to_anchor=(1.005, 0.75),
-           fontsize=18, frameon=False, title_fontsize=20)
+           fontsize=19, frameon=False, title_fontsize=21)
 fig.legend(handles=plat_handles, title='Platform (x-position in cluster)',
            loc='center left', bbox_to_anchor=(1.005, 0.32),
-           fontsize=18, frameon=False, title_fontsize=20)
+           fontsize=19, frameon=False, title_fontsize=21)
 fig.legend(handles=dist_handles, title='Distance (box width)',
            loc='center left', bbox_to_anchor=(1.005, 0.07),
-           fontsize=18, frameon=False, title_fontsize=20)
+           fontsize=19, frameon=False, title_fontsize=21)
 
 fig.suptitle('Sim-to-real gap: simulation ECR vs hardware ECR',
-             fontsize=22, x=0.62, y=1.02)
+             fontsize=23, x=0.62, y=1.02)
 plt.tight_layout(rect=[0, 0, 0.98, 1.0])
 
 for ext in ('png', 'pdf'):

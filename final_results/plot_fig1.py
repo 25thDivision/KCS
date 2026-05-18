@@ -163,7 +163,7 @@ def draw_panel_a(ax):
     # ax.text(q4[0] - 0.22, q4[1], '$q_4$', ha='right', va='center',
     #         fontsize=12, color=C['title'])
 
-    panel_caption(ax, '7 data + 3 ancillas on faces (R,G,B)',
+    panel_caption(ax, '7 data qubits + 3 plaquettes (R, G, B)',
                   y=0.20)
 
 
@@ -396,14 +396,29 @@ def draw_panel_d(ax):
            (q1[1] + q4[1] + q5[1] + q2[1]) / 4)
     iaB = ((q3[0] + q2[0] + q5[0] + q6[0]) / 4,
            (q3[1] + q2[1] + q5[1] + q6[1]) / 4)
-    ax.add_patch(Circle(iaR, ANC_R, facecolor=C['R'], alpha=0.55,
-                        edgecolor='black', linewidth=0.4, zorder=5))
-    ax.add_patch(Circle(iaG, ANC_R, facecolor=C['G'], alpha=0.55,
-                        edgecolor='black', linewidth=0.4, zorder=5))
-    ax.add_patch(Circle(iaB, ANC_R, facecolor=C['B'], alpha=0.55,
-                        edgecolor='black', linewidth=0.4, zorder=5))
+    # Two touching ancillas per face, oriented perpendicular to the gray
+    # cross-face line that passes through the face centroid (so the line
+    # bisects the pair):
+    #   Red   face ↔ q0–q5 line (vertical)
+    #   Green face ↔ q3–q4 line
+    #   Blue  face ↔ q1–q6 line
+    off = ANC_R * 1.18   # half-separation slightly > radius → small visible gap
+    faces = [
+        (iaR, C['R'], q0, q5),
+        (iaG, C['G'], q3, q4),
+        (iaB, C['B'], q1, q6),
+    ]
+    for (cx, cy), col, p1, p2 in faces:
+        dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+        L = np.hypot(dx, dy)
+        # Unit vector perpendicular to the bisecting line
+        ox, oy = -dy / L * off, dx / L * off
+        ax.add_patch(Circle((cx - ox, cy - oy), ANC_R, facecolor=col, alpha=0.55,
+                            edgecolor='black', linewidth=0.4, zorder=5))
+        ax.add_patch(Circle((cx + ox, cy + oy), ANC_R, facecolor=col, alpha=0.55,
+                            edgecolor='black', linewidth=0.4, zorder=5))
 
-    panel_caption(ax, '7 data + 3 ancillas', y=0.20)
+    panel_caption(ax, '7 data + 6 ancillas (X + Z)', y=0.20)
 
 
 # ============================================================
