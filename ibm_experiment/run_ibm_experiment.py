@@ -125,8 +125,14 @@ def send_discord_alert(model_name, d, p, err_type, ler, total_shots, backend_nam
                     f"{err_type} | {wn_params} | LER={ler:.4f}")
 
 
-def save_results(results: list):
-    output_dir = PATHS.experiment_result_dir("ibm")
+def save_results(results: list, backend_type: str = "qpu"):
+    # simulator 모드 결과는 실제 QPU 결과와 섞이지 않도록 별도 하위 디렉토리에 저장.
+    base_dir = PATHS.experiment_result_dir("ibm")
+    if str(backend_type).lower() == "simulator":
+        output_dir = os.path.join(base_dir, "simulator")
+        os.makedirs(output_dir, exist_ok=True)
+    else:
+        output_dir = base_dir
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(output_dir, f"ibm_results_{timestamp}.csv")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -261,9 +267,10 @@ def run_pipeline(config: dict):
         runner = IBMSimulator(
             backend_type=backend_cfg["type"],
             backend_instance=INSTANCE,
-            backend_name=BACKEND
+            backend_name=BACKEND,
+            capture=backend_cfg.get("capture", False),
         )
-        backend_for_layout = runner.backend if backend_cfg["type"] == "qpu" else None
+        backend_for_layout = runner.hw_backend  # simulator/qpu 모두 실제 IBM 백엔드를 layout 소스로
 
         print(f"\n>>> [Step 2] Building {code_type} Circuit...")
         sc, qc, initial_layout, layout_diag = build_circuit(
@@ -282,6 +289,8 @@ def run_pipeline(config: dict):
             initial_layout=initial_layout,
             dd_sequence=dd_sequence,
             optimization_level=backend_cfg.get("optimization_level", 2),
+            distance=distance,
+            num_rounds=num_rounds,
         )
 
         print(f"\n>>> [Step 4] Extracting syndromes and data states...")
@@ -577,7 +586,7 @@ def main():
     results = run_pipeline(CONFIG)
 
     if results:
-        save_results(results)
+        save_results(results, backend_type=CONFIG["backend"].get("type", "qpu"))
         print(f"\n{'='*70}")
         print("  Results Summary")
         print(f"{'='*70}")

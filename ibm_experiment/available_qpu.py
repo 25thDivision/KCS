@@ -1,11 +1,9 @@
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 instances = [
-    "Yonsei_internal",
-    "yonsei_internal-dedicated",
-    "Yonsei_internal-eu",
-    "Y_BS_candid-dedicated",
-    "Y_BS_candid",
+    # "Yonsei_internal",
+    # "Y_BS_candid",
+    "Yonsei_2026_1st_semester",
 ]
 
 for inst in instances:

@@ -108,6 +108,43 @@ class ProjectPaths:
         path = os.path.join(self.experiment_dir(platform), "results")
         os.makedirs(path, exist_ok=True)
         return path
+    
+    # =========================================================================
+    # NVIDIA Ising pre-decoder (외부 repo: Ising-Decoding/, repo root 직속)
+    # =========================================================================
+    @property
+    def nvidia_ising_dir(self) -> str:
+        """NVIDIA Ising-Decoding repo (외부 코드, repo root 직속, .gitignore 처리됨)"""
+        return os.path.join(self.root, "Ising-decoding")
+
+    @property
+    def nvidia_models_dir(self) -> str:
+        """Ising pre-decoder checkpoint 디렉토리 (Fast / Accurate .pt)"""
+        return os.path.join(self.nvidia_ising_dir, "models")
+
+    @property
+    def nvidia_fast_ckpt(self) -> str:
+        return os.path.join(self.nvidia_models_dir, "Ising-Decoder-SurfaceCode-1-Fast.pt")
+
+    @property
+    def nvidia_accurate_ckpt(self) -> str:
+        return os.path.join(self.nvidia_models_dir, "Ising-Decoder-SurfaceCode-1-Accurate.pt")
+
+    # =========================================================================
+    # IBM hardware captures (시점별 원본 shot 박제, .gitignore 처리됨)
+    # =========================================================================
+    def ibm_captures_dir(self) -> str:
+        """ibm_experiment/captures/ (hardware 원본 capture 루트)"""
+        path = os.path.join(self.ibm_dir, "captures")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def ibm_capture_dir(self, backend: str, distance: int, timestamp: str) -> str:
+        """ibm_experiment/captures/{backend}/d{distance}/{timestamp}/  (timestamp=YYYYMMDDThhmmss)"""
+        path = os.path.join(self.ibm_captures_dir(), backend, f"d{distance}", timestamp)
+        os.makedirs(path, exist_ok=True)
+        return path
+
 
     # =========================================================================
     # 유틸리티

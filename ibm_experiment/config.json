@@ -1,12 +1,13 @@
 {
     "backend": {
-        "type": "qpu",
+        "type": "simulator",
         "instance": "Yonsei_internal",
         "backend_name": "ibm_miami",
         "shots": 1000,
         "dynamical_decoupling": false,
         "dd_sequence": "XX4",
-        "optimization_level": 2
+        "optimization_level": 2,
+        "capture": true
     },
     "surface_code": {
         "distances": [3, 5],

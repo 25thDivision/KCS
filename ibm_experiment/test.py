@@ -178,50 +178,56 @@
 #             print(f"  opt={opt}: FAILED — {type(e).__name__}: {str(e)[:250]}")
 
 
-from qiskit import QuantumCircuit
-from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
-from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+# from qiskit import QuantumCircuit
+# from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
+# from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
-service = QiskitRuntimeService(instance="Yonsei_internal")
-backend = service.backend("ibm_miami")
+# service = QiskitRuntimeService(instance="Yonsei_internal")
+# backend = service.backend("ibm_miami")
 
-# Circuit A: measure twice without reset
-qc = QuantumCircuit(1, 2)
-qc.h(0)
-qc.measure(0, 0)        # m1
-qc.measure(0, 1)        # m2 (same qubit, no reset between)
+# # Circuit A: measure twice without reset
+# qc = QuantumCircuit(1, 2)
+# qc.h(0)
+# qc.measure(0, 0)        # m1
+# qc.measure(0, 1)        # m2 (same qubit, no reset between)
 
-# Use our standard transpile settings
-pm = generate_preset_pass_manager(
-    optimization_level=2,
-    basis_gates=['cz', 'sx', 'rz', 'x', 'id'],
-    coupling_map=backend.coupling_map,
-    initial_layout=[13],  # use a known-good qubit from our d=3 patch
-)
-tqc = pm.run(qc)
+# # Use our standard transpile settings
+# pm = generate_preset_pass_manager(
+#     optimization_level=2,
+#     basis_gates=['cz', 'sx', 'rz', 'x', 'id'],
+#     coupling_map=backend.coupling_map,
+#     initial_layout=[13],  # use a known-good qubit from our d=3 patch
+# )
+# tqc = pm.run(qc)
 
-sampler = Sampler(mode=backend)
-job = sampler.run([tqc], shots=100)
-result = job.result()
+# sampler = Sampler(mode=backend)
+# job = sampler.run([tqc], shots=100)
+# result = job.result()
 
-counts = result[0].data.meas.get_counts() if hasattr(result[0].data, 'meas') else result[0].data.c.get_counts()
+# counts = result[0].data.meas.get_counts() if hasattr(result[0].data, 'meas') else result[0].data.c.get_counts()
 
-# Analyze: count m1==m2 vs m1!=m2
-same = 0
-diff = 0
-for bitstr, cnt in counts.items():
-    # bitstr is '00', '01', '10', '11'. Parsing: first bit is cbit[1], second is cbit[0]
-    # or depends on endianness — need to verify once
-    m2_bit, m1_bit = bitstr[0], bitstr[1]  # likely
-    if m1_bit == m2_bit:
-        same += cnt
-    else:
-        diff += cnt
+# # Analyze: count m1==m2 vs m1!=m2
+# same = 0
+# diff = 0
+# for bitstr, cnt in counts.items():
+#     # bitstr is '00', '01', '10', '11'. Parsing: first bit is cbit[1], second is cbit[0]
+#     # or depends on endianness — need to verify once
+#     m2_bit, m1_bit = bitstr[0], bitstr[1]  # likely
+#     if m1_bit == m2_bit:
+#         same += cnt
+#     else:
+#         diff += cnt
 
-print(f"m1 == m2: {same}/100")
-print(f"m1 != m2: {diff}/100")
-print()
-print(f"Interpretation:")
-print(f"  If no-reset works: m1==m2 should be ~100/100")
-print(f"  If implicit reset: m1==m2 should be ~50/100 (m2 always 0, m1 random)")
-print(f"  If decoherence dominates: m1==m2 somewhere between, e.g. 60-70/100")
+# print(f"m1 == m2: {same}/100")
+# print(f"m1 != m2: {diff}/100")
+# print()
+# print(f"Interpretation:")
+# print(f"  If no-reset works: m1==m2 should be ~100/100")
+# print(f"  If implicit reset: m1==m2 should be ~50/100 (m2 always 0, m1 random)")
+# print(f"  If decoherence dominates: m1==m2 somewhere between, e.g. 60-70/100")
+
+
+import requests, time
+t = time.time()
+r = requests.get("https://quantum.cloud.ibm.com/", timeout=10)
+print(r.status_code, round(time.time() - t, 2))

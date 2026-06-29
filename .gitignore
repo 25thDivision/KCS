@@ -32,3 +32,9 @@ final_results__/
 ibm_experiment/results/
 ionq_experiment/results/
 stim_simulation/test_results_(legacy)/
+
+# NVIDIA Ising repo (외부 코드, 각자 clone) — repo root 직속
+Ising-decoding/
+
+# IBM hardware 원본 capture (시점별 박제, git에 안 올림)
+ibm_experiment/captures/

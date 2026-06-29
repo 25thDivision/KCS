@@ -1,5 +1,10 @@
-"""MWPM 디버깅: noiseless 검증 + shot-level NC vs MWPM 비교."""
-import os, sys
+"""MWPM 디버깅: simulator(노이즈 = IBM backend calibration 스냅샷) + shot-level NC vs MWPM 비교.
+
+NOTE: 이전엔 인자 없는 AerSimulator(no-noise)로 'noiseless 검증' 용도였으나,
+IBMSimulator의 simulator 분기가 NoiseModel.from_backend(...)로 변경됨에 따라
+이 스크립트도 자동으로 noisy run이 됨. backend_name/instance는 config.json 따름.
+"""
+import os, sys, json
 import numpy as np
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,11 +24,17 @@ INITIAL_STATE = 0
 SHOTS = 2000
 
 print("=" * 70)
-print("  Step 1: Build circuit + run on noiseless AerSimulator")
+print("  Step 1: Build circuit + run on AerSimulator (noise from config backend)")
 print("=" * 70)
+with open(os.path.join(current_dir, "config.json")) as _f:
+    _bc = json.load(_f)["backend"]
 sc = HeavyHexSurfaceCode(distance=DISTANCE, num_rounds=NUM_ROUNDS)
 qc = sc.build_circuit(initial_state=INITIAL_STATE)
-runner = IBMSimulator(backend_type="simulator")
+runner = IBMSimulator(
+    backend_type="simulator",
+    backend_instance=_bc["instance"],
+    backend_name=_bc["backend_name"],
+)
 counts = runner.run(qc, shots=SHOTS)
 
 syn_indices = sc.get_syndrome_indices()
@@ -54,7 +65,7 @@ nc_ler = 1.0 - (nc_correct * shot_counts).sum() / shot_counts.sum()
 mwpm_ler = 1.0 - (mwpm_correct * shot_counts).sum() / shot_counts.sum()
 print(f"  Total shots: {shot_counts.sum()}")
 print(f"  NC   LER: {nc_ler:.4f}")
-print(f"  MWPM LER: {mwpm_ler:.4f}  (noiseless → 0% expected)")
+print(f"  MWPM LER: {mwpm_ler:.4f}  (calibration noise, not zero)")
 
 print("\n" + "=" * 70)
 print("  Step 3: Shot-level comparison")
