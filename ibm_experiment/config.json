@@ -1,6 +1,6 @@
 {
     "backend": {
-        "type": "simulator",
+        "type": "qpu",
         "instance": "Yonsei_internal",
         "backend_name": "ibm_miami",
         "shots": 1000,

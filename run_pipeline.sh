@@ -1,33 +1,45 @@
 #!/bin/bash
-PIPELINE_ID=Final_Results
+PIPELINE_ID=Backend_recording_$(date +%Y%m%d_%H%M%S)
 
 # 각 프로세서를 독립적으로 5회 순차 실행, 프로세서 간은 병렬
 run_sequential() {
     local platform=$1
     local backend=$2
-    local runs=("1st" "2nd" "3rd" "4th" "5th")
+    local instance=$3
+    local runs=("1st" "2nd" "3rd" "4th" "5th" "6th" "7th" "8th" "9th" "10th")
     local models="CNN GCNII APPNP GraphTransformer GCN GAT GNN GraphMamba"
+
+    # IBM 코드 타입: miami(Nighthawk)는 surface, 나머지(heavy-hex)는 heavyhex
+    local code_type=""
+    if [ "$platform" == "ibm" ]; then
+        if [ "$backend" == "ibm_miami" ]; then
+            code_type="surface_code"
+        else
+            code_type="heavyhex_surface_code"
+        fi
+    fi
 
     for run in "${runs[@]}"; do
         echo "============================================"
-        echo "[${platform}/${backend:-default}] ${run} 시작"
+        echo "[${platform}/${backend:-default}/${instance:-default}] ${run} 시작"
         echo "============================================"
         if [ "$platform" == "ibm" ]; then
-            python3 run_suite.py --id $PIPELINE_ID/$run --experiment ibm -b $backend -m $models
+            python3 run_suite.py --id $PIPELINE_ID/$run --experiment ibm -b $backend -i $instance -m $models -c $code_type
         else
             python3 run_suite.py --id $PIPELINE_ID/$run --experiment ionq -m $models
         fi
         echo "============================================"
-        echo "[${platform}/${backend:-default}] ${run} 완료"
+        echo "[${platform}/${backend:-default}/${instance:-default}] ${run} 완료"
         echo "============================================"
     done
 }
 
 # 3개 프로세서 병렬, 각각 내부적으로 5회 순차
-run_sequential ibm ibm_boston &
-run_sequential ibm ibm_pittsburgh &
-run_sequential ibm ibm_aachen &
-run_sequential ionq &
+run_sequential ibm ibm_boston Yonsei_internal &
+run_sequential ibm ibm_pittsburgh Yonsei_internal &
+run_sequential ibm ibm_aachen Yonsei_internal-eu &
+run_sequential ibm ibm_miami Yonsei_internal &
+# run_sequential ionq &
 
 wait
 echo "=== 🎉 데이터 수집 완료 ==="

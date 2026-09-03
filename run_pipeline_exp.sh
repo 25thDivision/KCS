@@ -1,5 +1,5 @@
 #!/bin/bash
-PIPELINE_ID=Curiousity_more_runs_$(date +%Y%m%d_%H%M%S)
+PIPELINE_ID=NVIDIA_QPU_test_$(date +%Y%m%d_%H%M%S)
 
 # 각 프로세서를 독립적으로 5회 순차 실행, 프로세서 간은 병렬
 run_sequential() {
@@ -35,11 +35,11 @@ run_sequential() {
 }
 
 # 3개 프로세서 병렬, 각각 내부적으로 5회 순차
-run_sequential ibm ibm_boston Yonsei_internal &
-run_sequential ibm ibm_pittsburgh Yonsei_internal &
-run_sequential ibm ibm_aachen Yonsei_internal-eu &
+# run_sequential ibm ibm_boston Yonsei_internal &
+# run_sequential ibm ibm_pittsburgh Yonsei_internal &
+# run_sequential ibm ibm_aachen Yonsei_internal-eu &
 run_sequential ibm ibm_miami Yonsei_internal &
-run_sequential ionq &
+# run_sequential ionq &
 
 wait
 echo "=== 🎉 데이터 수집 완료 ==="

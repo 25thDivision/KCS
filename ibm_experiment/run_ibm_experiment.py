@@ -96,33 +96,53 @@ DISCORD_WEBHOOK_URL = KEYS.get("discord_ibm", "")
 # ============================================================================
 # Discord / CSV
 # ============================================================================
-def send_discord_alert(model_name, d, p, err_type, ler, total_shots, backend_name, weight_noise):
+def log_result(model_name, d, p, err_type, ler, total_shots, backend_name, weight_noise):
+    """개별 모델 결과를 파일 로그(logs/logger)에만 기록. Discord 전송은
+    (distance, noise) 단위 묶음으로 send_discord_summary 가 담당."""
     try:
-        wn_type, wn_params = weight_noise.split('/')
-        wn_type = wn_type.capitalize()
-    except ValueError:
-        wn_type, wn_params = weight_noise, "N/A"
-
+        _, wn_params = weight_noise.split('/')
+    except (ValueError, AttributeError):
+        wn_params = weight_noise
     log_to_file(f"IBM | {model_name} | d={d}, p={p}, {err_type} | {wn_params} | LER={ler:.4f}")
 
+
+def send_discord_summary(distance, noise, backend_name, baseline_rows, noise_rows):
+    """(distance, noise) 한 구간의 모든 모델 결과를 1개 Discord 알림(코드블록 표)으로 전송.
+
+    baseline_rows: No_Correction 등 distance-레벨 baseline (매 noise 알림 상단 반복 표시).
+    noise_rows:    이 noise 의 MWPM / NVIDIA / 8 models / hybrids.
+    """
     if not DISCORD_WEBHOOK_URL:
         return
+    rows = list(baseline_rows) + list(noise_rows)
+    if not rows:
+        return
+    lines = []
+    for r in rows:
+        p = r.get("stim_error_rate", 0)
+        et = r.get("stim_error_type", "N/A")
+        tag = f"(p{p},{et})" if p else ""
+        lines.append(
+            f"{r['model_name']:<18}{tag:<12} LER={r['logical_error_rate']:.4f} "
+            f"({r['logical_errors']}/{r['total_shots']})"
+        )
+    table = "\n".join(lines)
+    desc = (f"**d={distance}** | noise=`{noise}` | `{backend_name}`\n"
+            f"```\n{table}\n```")
+    if len(desc) > 4000:  # Discord embed description 제한 (~4096)
+        desc = desc[:3990] + "\n…```"
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={
-            "content": f"🔬 **[IBM Phase 2] {model_name} Evaluated!**",
-            "embeds": [{"title": f"📊 Surface Code Experiment Results",
-                "description": f"**Weight**: `{wn_type}` (`{wn_params}`)\n"
-                               f"**Setting**: `d={d}`, `p={p}`, Error: `{err_type}`",
+            "content": f"🔬 **[IBM Phase 2] d={distance} | {noise}**",
+            "embeds": [{
+                "title": "📊 Surface Code Results (per distance/noise)",
+                "description": desc,
                 "color": 3447003,
-                "fields": [
-                    {"name": "🎯 LER", "value": f"{ler:.4f}", "inline": True},
-                    {"name": "📊 Total Shots", "value": str(total_shots), "inline": True},
-                    {"name": "🤖 Model", "value": model_name, "inline": True},
-                ], "footer": {"text": f"STL Lab Server | IBM Phase 2 | {backend_name}"}}]
+                "footer": {"text": f"STL Lab Server | IBM Phase 2 | {backend_name}"},
+            }],
         }, timeout=5)
     except Exception:
-        log_to_file(f"IBM | Failed to send Discord alert: {model_name} | d={d}, p={p}, "
-                    f"{err_type} | {wn_params} | LER={ler:.4f}")
+        log_to_file(f"IBM | Failed to send Discord summary: d={distance}, noise={noise}")
 
 
 def save_results(results: list, backend_type: str = "qpu"):
@@ -313,6 +333,30 @@ def run_pipeline(config: dict):
             stim_data_indices=stim_data_indices,
         )
 
+        # === NVIDIA Ising pre-decoder (zero-shot, surface_code 한정, distance당 1회 로드) ===
+        # 잔차 디코딩은 per-noise MWPM matcher를 재사용하므로 noise 루프 안에서 평가.
+        nvidia_model = None
+        nvidia_device = None
+        if code_type == "surface_code":
+            try:
+                import torch
+                from decoders.nvidia_predecoder import load_nvidia_predecoder
+                nvidia_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                nvidia_model = load_nvidia_predecoder(
+                    weight_path=PATHS.nvidia_accurate_ckpt,
+                    distance=distance, n_rounds=num_rounds,
+                    device=nvidia_device, model_id=4,
+                )
+                print(f"\n>>> NVIDIA pre-decoder loaded (Accurate, model_id=4, device={nvidia_device})")
+            except Exception as e:
+                print(f"\n    ⚠️ NVIDIA pre-decoder load failed: {e}")
+                log_to_file(f"IBM | NVIDIA | d={distance} | FAILED load: {e}")
+                nvidia_model = None
+
+        # distance-레벨 baseline (No_Correction, heavyhex MWPM) 수집 시작점.
+        # 이 구간 결과는 매 noise Discord 요약 상단에 반복 표시된다.
+        _baseline_start = len(results)
+
         # No Correction
         if "No_Correction" in baselines:
             no_correction = np.zeros_like(data_states)
@@ -320,7 +364,7 @@ def run_pipeline(config: dict):
             nc_ler = nc_result["logical_error_rate"]
             print(f"\n📊 IBM No Correction: LER={nc_ler:.4f} "
                   f"({nc_result['logical_errors']}/{nc_result['total_shots']})")
-            send_discord_alert("No_Correction", distance, 0, "N/A",
+            log_result("No_Correction", distance, 0, "N/A",
                                nc_ler, nc_result["total_shots"], BACKEND, "N/A")
             results.append({
                 "model_name": "No_Correction", "distance": distance,
@@ -350,7 +394,7 @@ def run_pipeline(config: dict):
                 mwpm_ler = mwpm_eval["logical_error_rate"]
                 print(f"\n📊 MWPM (HeavyHex): LER={mwpm_ler:.4f} "
                       f"({mwpm_eval['logical_errors']}/{mwpm_eval['total_shots']})")
-                send_discord_alert("MWPM", distance, 0, "N/A",
+                log_result("MWPM", distance, 0, "N/A",
                                    mwpm_ler, mwpm_eval["total_shots"],
                                    BACKEND, "N/A")
                 results.append({
@@ -367,9 +411,14 @@ def run_pipeline(config: dict):
                 print(f"\n    ⚠️ MWPM (HeavyHex) decoder failed: {e}")
                 log_to_file(f"IBM | MWPM | d={distance} | FAILED: {e}")
 
+        # distance-레벨 baseline 행 (No_Correction, heavyhex MWPM) — 매 noise 요약 상단 표시용
+        distance_baseline_rows = list(results[_baseline_start:])
+
         # === Noise-dependent loop ===
         for noise in noise_list:
             print(f"\n>>> [Step 5] Noise profile: {noise}")
+
+            _noise_start = len(results)  # 이 noise 구간 결과 수집 시작점
 
             edge_dir = PATHS.stim_data_dir(code_type, noise, "graph")
             converter = StimFormatConverter(
@@ -393,7 +442,7 @@ def run_pipeline(config: dict):
                     mwpm_ler = mwpm_eval["logical_error_rate"]
                     print(f"\n📊 MWPM ({noise}): LER={mwpm_ler:.4f} "
                           f"({mwpm_eval['logical_errors']}/{mwpm_eval['total_shots']})")
-                    send_discord_alert("MWPM", distance, 0, "N/A",
+                    log_result("MWPM", distance, 0, "N/A",
                                        mwpm_ler, mwpm_eval["total_shots"],
                                        BACKEND, noise)
                     results.append({
@@ -410,6 +459,51 @@ def run_pipeline(config: dict):
                     print(f"\n    ⚠️ MWPM (surface_code) failed for {noise}: {e}")
                     log_to_file(f"IBM | MWPM | d={distance}, {noise} | FAILED: {e}")
                     mwpm_per_noise = None
+
+            # === NVIDIA Ising pre-decoder (zero-shot) + 잔차 PyMatching (A1) ===
+            #   - NVIDIA NN 은 noise-independent, 잔차 디코딩 matcher 는 per-noise MWPM 재사용.
+            #   - correction frame (N, num_data) → 기존 evaluator 로 동일하게 LER 계산.
+            if (code_type == "surface_code" and nvidia_model is not None
+                    and mwpm_per_noise is not None):
+                try:
+                    from decoders.nvidia_predecoder import (
+                        kcs_to_nvidia_input, run_nvidia_predecoder,
+                        nvidia_to_correction_frame,
+                    )
+                    nv_in = kcs_to_nvidia_input(
+                        syndromes=syndromes, data_states=data_states,
+                        x_stabilizers=sc.x_stabilizers, z_stabilizers=sc.z_stabilizers,
+                        distance=distance, n_rounds=num_rounds,
+                        basis="Z", device=nvidia_device,
+                    )
+                    nv_out = run_nvidia_predecoder(nvidia_model, nv_in)
+                    nv_baseline_det = converter.hw_to_mwpm_detectors(syndromes, data_states)
+                    nv_corr = nvidia_to_correction_frame(
+                        nvidia_out=nv_out, baseline_detectors=nv_baseline_det,
+                        matcher=mwpm_per_noise.matcher,
+                        x_stabilizers=sc.x_stabilizers, z_stabilizers=sc.z_stabilizers,
+                        distance=distance, num_rounds=num_rounds,
+                        logical_z=sc.logical_z, num_data=sc.num_data,
+                        verbose_stats=True, stats_tag=f"d={distance} noise={noise}",
+                    )
+                    nv_eval = evaluator.evaluate(data_states, nv_corr, shot_counts)
+                    nv_ler = nv_eval["logical_error_rate"]
+                    print(f"\n📊 NVIDIA ({noise}): LER={nv_ler:.4f} "
+                          f"({nv_eval['logical_errors']}/{nv_eval['total_shots']})")
+                    log_result("NVIDIA", distance, 0, "N/A",
+                                       nv_ler, nv_eval["total_shots"], BACKEND, noise)
+                    results.append({
+                        "model_name": "NVIDIA", "distance": distance,
+                        "num_rounds": num_rounds, "backend": BACKEND,
+                        "shots": backend_cfg["shots"], "stim_error_rate": 0,
+                        "stim_error_type": "N/A", "weight_noise": noise,
+                        "logical_error_rate": nv_ler,
+                        "total_shots": nv_eval["total_shots"],
+                        "logical_errors": nv_eval["logical_errors"],
+                    })
+                except Exception as e:
+                    print(f"\n    ⚠️ NVIDIA pre-decoder failed for {noise}: {e}")
+                    log_to_file(f"IBM | NVIDIA | d={distance}, {noise} | FAILED: {e}")
 
             for model_name in top_models:
                 model_type = eval_cfg["model_type_map"].get(model_name, "graph")
@@ -468,7 +562,7 @@ def run_pipeline(config: dict):
                         print(f"        ✅ Logical Error Rate: {ler:.4f} "
                               f"({eval_result['logical_errors']}/{eval_result['total_shots']})")
 
-                        send_discord_alert(model_name, distance, p, err_type,
+                        log_result(model_name, distance, p, err_type,
                                            ler, eval_result["total_shots"], BACKEND, noise)
 
                         results.append({
@@ -525,7 +619,7 @@ def run_pipeline(config: dict):
                                     "total_shots": hybrid_eval["total_shots"],
                                     "logical_errors": hybrid_eval["logical_errors"],
                                 })
-                                send_discord_alert(f"MWPM+{model_name}", distance, p,
+                                log_result(f"MWPM+{model_name}", distance, p,
                                                    err_type, hybrid_ler,
                                                    hybrid_eval["total_shots"],
                                                    BACKEND, noise)
@@ -566,7 +660,7 @@ def run_pipeline(config: dict):
                                 "total_shots": ml_mwpm_eval["total_shots"],
                                 "logical_errors": ml_mwpm_eval["logical_errors"],
                             })
-                            send_discord_alert(f"{model_name}+MWPM", distance, p,
+                            log_result(f"{model_name}+MWPM", distance, p,
                                                err_type, ml_mwpm_ler,
                                                ml_mwpm_eval["total_shots"],
                                                BACKEND, noise)
@@ -574,6 +668,11 @@ def run_pipeline(config: dict):
                             print(f"        ⚠️ Hybrid {model_name}+MWPM failed: {e}")
                             log_to_file(f"IBM | {model_name}+MWPM | d={distance}, p={p}, "
                                         f"{err_type}, {noise} | FAILED: {e}")
+
+            # (distance, noise) 묶음 Discord 요약 — baseline(No_Correction 등) + 이 noise 의 모든 모델/하이브리드
+            noise_rows = results[_noise_start:]
+            send_discord_summary(distance, noise, BACKEND,
+                                 distance_baseline_rows, noise_rows)
 
     return results
 

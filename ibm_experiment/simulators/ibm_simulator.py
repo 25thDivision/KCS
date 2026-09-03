@@ -397,8 +397,17 @@ class IBMSimulator:
 
         - 위치: PATHS.ibm_capture_dir(backend, distance, timestamp)
           (distance None이면 "unknown" → captures/{backend}/dunknown/{timestamp}/)
-        - 산출물: per_shot.txt, pub_result.pkl(가능시), metadata.json, calibration.json
-        - 각 항목 개별 try/except, metadata.json은 항상 시도하며 다른 항목 실패 사유를 안에 기록
+        - 산출물 (QPU 재현 목적, 각 항목 개별 try/except):
+            per_shot.txt          : per-shot raw bitstring
+            pub_result.pkl        : SamplerV2 결과 (가능시)
+            calibration.json      : properties().to_dict() (T1/T2/gate/readout error + general의 ZZ/J coupling — 시변)
+            qubit_properties.json : qubit_properties() (T1/T2/frequency 등 — to_dict 가 놓치는 freq 보완)
+            backend_config.json   : coupling_map(topology) / basis_gates / dt / num_qubits (정적 특성)
+            status.json           : backend.status() (operational / pending_jobs — 그 시점 부하)
+            transpiled_circuit.qpy: hardware 실행 회로 (그 시점 transpile 결과)
+            source_circuit.qpy    : transpile 전 원본 회로
+            metadata.json         : job_id / job.metrics()(실행 시각) / shots / distance / layout 등
+        - metadata.json은 항상 시도하며 다른 항목 실패 사유(capture_errors)를 안에 기록
         - 호출 측이 외부 try/except로 감싸므로 여기서 예외가 전파돼도 counts 반환은 무영향
         """
         import pickle
@@ -457,7 +466,86 @@ class IBMSimulator:
         except Exception as e:
             errors["calibration"] = f"{type(e).__name__}: {e}"
 
-        # 4) metadata.json (항상 시도)
+        # 정적 device 특성 + 시변 부하/회로 — 완전 재현용 (self.hw_backend = 실제 IBM 백엔드)
+        hwb = getattr(self, "hw_backend", None) or self.backend
+
+        # 4.5) qubit_properties.json (BackendV2 — properties().to_dict() 가 놓치는 frequency 등 보완)
+        try:
+            nq = getattr(hwb, "num_qubits", 0)
+            qp_list = []
+            for q in range(nq):
+                try:
+                    qp = hwb.qubit_properties(q)
+                    rec = {"qubit": q}
+                    for attr in ("t1", "t2", "frequency", "anharmonicity"):
+                        rec[attr] = getattr(qp, attr, None)
+                    # 백엔드별 추가 속성도 포착 (private 언더스코어 제거)
+                    for k, v in getattr(qp, "__dict__", {}).items():
+                        k2 = k.lstrip("_")
+                        if k2 not in rec:
+                            rec[k2] = v
+                    qp_list.append(rec)
+                except Exception:
+                    qp_list.append({"qubit": q, "error": "unavailable"})
+            with open(os.path.join(capture_dir, "qubit_properties.json"), "w") as f:
+                json.dump(qp_list, f, default=str, indent=2)
+        except Exception as e:
+            errors["qubit_properties"] = f"{type(e).__name__}: {e}"
+
+        # 5) backend_config.json (topology / basis_gates / dt / num_qubits — 정적 특성)
+        try:
+            try:
+                edges = [list(e) for e in hwb.coupling_map.get_edges()]
+            except Exception:
+                edges = None
+            try:
+                basis = list(getattr(hwb, "operation_names", None)
+                             or hwb.configuration().basis_gates)
+            except Exception:
+                basis = None
+            cfg_payload = {
+                "num_qubits": getattr(hwb, "num_qubits", None),
+                "basis_gates": basis,
+                "dt": getattr(hwb, "dt", None),
+                "coupling_map": edges,
+            }
+            with open(os.path.join(capture_dir, "backend_config.json"), "w") as f:
+                json.dump(cfg_payload, f, default=str, indent=2)
+        except Exception as e:
+            errors["backend_config"] = f"{type(e).__name__}: {e}"
+
+        # 6) status.json (operational / pending_jobs — 그 시점 device 부하)
+        try:
+            st = hwb.status()
+            st_payload = {
+                "operational": getattr(st, "operational", None),
+                "pending_jobs": getattr(st, "pending_jobs", None),
+                "status_msg": getattr(st, "status_msg", None),
+                "backend_version": getattr(st, "backend_version", None),
+            }
+            with open(os.path.join(capture_dir, "status.json"), "w") as f:
+                json.dump(st_payload, f, default=str, indent=2)
+        except Exception as e:
+            errors["status"] = f"{type(e).__name__}: {e}"
+
+        # 7) 회로 QPY (그 시점 실제 실행된 transpiled 회로 + 원본)
+        try:
+            from qiskit import qpy
+            with open(os.path.join(capture_dir, "transpiled_circuit.qpy"), "wb") as f:
+                qpy.dump(transpiled, f)
+            with open(os.path.join(capture_dir, "source_circuit.qpy"), "wb") as f:
+                qpy.dump(circuit, f)
+        except Exception as e:
+            errors["circuit_qpy"] = f"{type(e).__name__}: {e}"
+
+        # 8) job.metrics() (큐/실행 시각 — calibration 시점과의 간격 분석용)
+        try:
+            job_metrics = job.metrics()
+        except Exception as e:
+            job_metrics = None
+            errors["job_metrics"] = f"{type(e).__name__}: {e}"
+
+        # 9) metadata.json (항상 시도)
         try:
             try:
                 job_id = job.job_id()
@@ -501,6 +589,7 @@ class IBMSimulator:
                     "num_qubits": transpiled.num_qubits,
                     "depth": transpiled.depth(),
                 },
+                "job_metrics": job_metrics,
                 "capture_errors": errors or None,
             }
             with open(os.path.join(capture_dir, "metadata.json"), "w") as f:
